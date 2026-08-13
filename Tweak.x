@@ -205,12 +205,6 @@ static void createFloatingButton() {
     });
 }
 
-        floatingButton.userInteractionEnabled = YES;
-
-        HLog(@"悬浮窗已创建");
-    });
-}
-
 // 更新悬浮窗计数
 static void updateFloatingButton() {
     dispatch_async(dispatch_get_main_queue(), ^{
