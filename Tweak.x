@@ -177,12 +177,15 @@ static void recordCapture(NSString *url, NSString *method, NSString *reqBody, NS
         if (floatingButton)
             [floatingButton setTitle:[NSString stringWithFormat:@"抓到\n%d", captureCount] forState:UIControlStateNormal];
     });
-    // 远程上报完整抓包内容
-    NSMutableString *full = [NSMutableString stringWithFormat:@"[CAPTURE #%d]\nURL: %@\nMETHOD: %@\n", captureCount, url, method?:@""];
-    if (reqBody)  [full appendFormat:@"--- REQ BODY ---\n%@\n", reqBody];
-    if (respBody) [full appendFormat:@"--- RESP ---\n%@\n", respBody];
-    if (parsed)   [full appendFormat:@"--- PARSED ---\n%@\n", parsed];
-    sendLogToServer(@"capture", full);
+    // 只有目标接口(★/profile/self)才远程上报, 避免POST洪水
+    BOOL shouldReport = ([url containsString:@"★"] || urlMatches(url));
+    if (shouldReport) {
+        NSMutableString *full = [NSMutableString stringWithFormat:@"[CAPTURE #%d]\nURL: %@\nMETHOD: %@\n", captureCount, url, method?:@""];
+        if (reqBody)  [full appendFormat:@"--- REQ BODY ---\n%@\n", reqBody];
+        if (respBody) [full appendFormat:@"--- RESP ---\n%@\n", respBody];
+        if (parsed)   [full appendFormat:@"--- PARSED ---\n%@\n", parsed];
+        sendLogToServer(@"capture", full);
+    }
     NSLog(@"[TKCap] ✅ 抓到第%d条: %@", captureCount, url);
 }
 
@@ -528,6 +531,64 @@ static id handleRespSerializer(id response, id data, id retval) {
     return req;
 }
 
+%end
+
+// ============================================
+// NSURLSession hook: 抓走标准HTTPS流量的接口 (Charles能抓的这里也能抓)
+// 这层是双保险: 若profile/self不走QUIC而走NSURLSession, 这里必命中
+// ============================================
+
+// 判断URL是否值得记录 (TikTok业务域名, 排除静态资源)
+static BOOL sessionURLInteresting(NSString *url) {
+    if (!url) return NO;
+    NSString *low = [url lowercaseString];
+    // 排除自己的日志上报服务器 (防止hook递归)
+    if ([low containsString:@"159.75.14.193"]) return NO;
+    // 排除图片/视频/静态资源
+    if ([low containsString:@".jpg"] || [low containsString:@".jpeg"] ||
+        [low containsString:@".png"] || [low containsString:@".webp"] ||
+        [low containsString:@".mp4"] || [low containsString:@".ttf"] ||
+        [low containsString:@".css"] || [low containsString:@".js"] ||
+        [low containsString:@"gecko"] || [low containsString:@"/obj/"] ||
+        [low containsString:@"maliva"] || [low containsString:@"pstatp"]) return NO;
+    // 只要TikTok业务域名/api
+    if ([low containsString:@"tiktok"] || [low containsString:@"aweme"] ||
+        [low containsString:@"musical"] || [low containsString:@"byteoversea"] ||
+        [low containsString:@"/api/"] || [low containsString:@"/tiktok/"]) return YES;
+    return NO;
+}
+
+%hook NSURLSession
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler {
+    NSString *urlString = request.URL.absoluteString;
+    if (!sessionURLInteresting(urlString) || !completionHandler) {
+        return %orig;
+    }
+    // 请求体 (明文)
+    NSString *reqBody = nil;
+    if (request.HTTPBody) {
+        reqBody = [[NSString alloc] initWithData:request.HTTPBody encoding:NSUTF8StringEncoding];
+        if (!reqBody) reqBody = dumpData(request.HTTPBody, 4000);
+    }
+    NSString *method = request.HTTPMethod ?: @"GET";
+    BOOL isTarget = urlMatches(urlString);   // profile/self 命中 -> 标★
+
+    void (^newHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
+        @try {
+            NSString *respBody = nil;
+            if (data && data.length > 0) {
+                respBody = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+                if (!respBody) respBody = dumpData(data, 6000);
+                else if (respBody.length > 6000) respBody = [respBody substringToIndex:6000];
+            }
+            // 目标接口全记; 非目标只在诊断时记URL(留痕, 方便定位走没走这条链)
+            NSString *tag = isTarget ? [NSString stringWithFormat:@"[NSURLSession★] %@", urlString] : [NSString stringWithFormat:@"[NSURLSession] %@", urlString];
+            recordCapture(tag, method, reqBody, respBody, nil);
+        } @catch (__unused NSException *e) {}
+        completionHandler(data, response, error);
+    };
+    return %orig(request, newHandler);
+}
 %end
 
 // ============ UIButton category ============
