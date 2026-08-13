@@ -9,5 +9,6 @@ TikTokProfileUnlock_FILES = Tweak.x
 TikTokProfileUnlock_CFLAGS = -fobjc-arc
 TikTokProfileUnlock_FRAMEWORKS = UIKit Foundation CFNetwork
 TikTokProfileUnlock_PRIVATE_FRAMEWORKS =
+TikTokProfileUnlock_LDFLAGS = -undefined dynamic_lookup
 
 include $(THEOS)/makefiles/tweak.mk
