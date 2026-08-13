@@ -190,12 +190,20 @@ static void createFloatingButton() {
         // 存储window引用防止释放
         objc_setAssociatedObject(floatingButton, "topWindow", topWindow, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-        // 添加拖动手势
-        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:floatingButton action:@selector(handlePan:)];
-        [floatingButton addGestureRecognizer:pan];
+        // 添加长按拖动手势
+        UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:floatingButton action:@selector(handleLongPress:)];
+        longPress.minimumPressDuration = 0.3;
+        [floatingButton addGestureRecognizer:longPress];
 
-        // 添加点击事件
-        [floatingButton addTarget:floatingButton action:@selector(onButtonTap:) forControlEvents:UIControlEventTouchUpInside];
+        // 添加点击手势（用手势识别器，不用addTarget避免冲突）
+        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:floatingButton action:@selector(onButtonTap:)];
+        [floatingButton addGestureRecognizer:tap];
+
+        floatingButton.userInteractionEnabled = YES;
+
+        HLog(@"悬浮窗已创建");
+    });
+}
 
         floatingButton.userInteractionEnabled = YES;
 
@@ -458,21 +466,23 @@ static void startHTTPServer() {
 // UIButton拖动手势处理和点击事件
 // ============================================
 @interface UIButton (DragSupport)
-- (void)handlePan:(UIPanGestureRecognizer *)recognizer;
-- (void)onButtonTap:(UIButton *)sender;
+- (void)handleLongPress:(UILongPressGestureRecognizer *)recognizer;
+- (void)onButtonTap:(UITapGestureRecognizer *)recognizer;
 - (void)openBrowser:(UIButton *)sender;
 - (void)hidePanel:(UIButton *)sender;
 @end
 
 @implementation UIButton (DragSupport)
-- (void)handlePan:(UIPanGestureRecognizer *)recognizer {
+- (void)handleLongPress:(UILongPressGestureRecognizer *)recognizer {
     UIView *view = recognizer.view;
-    CGPoint translation = [recognizer translationInView:view.superview];
-    view.center = CGPointMake(view.center.x + translation.x, view.center.y + translation.y);
-    [recognizer setTranslation:CGPointZero inView:view.superview];
+    CGPoint location = [recognizer locationInView:view.superview];
+
+    if (recognizer.state == UIGestureRecognizerStateBegan || recognizer.state == UIGestureRecognizerStateChanged) {
+        view.center = location;
+    }
 }
 
-- (void)onButtonTap:(UIButton *)sender {
+- (void)onButtonTap:(UITapGestureRecognizer *)recognizer {
     showControlPanel();
 }
 
