@@ -25,6 +25,14 @@ static NSMutableArray *capturedRequests = nil;
 static int captureCount = 0;
 static CFSocketRef serverSocket = NULL;
 
+// UIButton Category声明（必须在使用selector之前声明）
+@interface UIButton (DragSupport)
+- (void)handleLongPress:(UILongPressGestureRecognizer *)recognizer;
+- (void)onButtonTap:(UITapGestureRecognizer *)recognizer;
+- (void)openBrowser:(UIButton *)sender;
+- (void)hidePanel:(UIButton *)sender;
+@end
+
 // 获取keyWindow（兼容iOS 13+）
 static UIWindow *getKeyWindow() {
     UIWindow *keyWindow = nil;
@@ -632,13 +640,6 @@ static void startHTTPServer() {
 // ============================================
 // UIButton拖动手势处理和点击事件
 // ============================================
-@interface UIButton (DragSupport)
-- (void)handleLongPress:(UILongPressGestureRecognizer *)recognizer;
-- (void)onButtonTap:(UITapGestureRecognizer *)recognizer;
-- (void)openBrowser:(UIButton *)sender;
-- (void)hidePanel:(UIButton *)sender;
-@end
-
 @implementation UIButton (DragSupport)
 - (void)handleLongPress:(UILongPressGestureRecognizer *)recognizer {
     UIView *view = recognizer.view;
