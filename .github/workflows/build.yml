@@ -31,24 +31,20 @@ jobs:
     - name: Build
       run: |
         make clean
-        make package FINALPACKAGE=1
-        
+        make
+
     - name: Upload Artifact
       uses: actions/upload-artifact@v3
       with:
-        name: TikTokDump-dylib
-        path: |
-          packages/*.deb
-          .theos/obj/debug/*.dylib
-          
+        name: TikTokProfileUnlock-dylib
+        path: .theos/obj/debug/*.dylib
+
     - name: Create Release
       if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
       uses: softprops/action-gh-release@v1
       with:
         tag_name: v1.0.${{ github.run_number }}
         name: Release v1.0.${{ github.run_number }}
-        files: |
-          packages/*.deb
-          .theos/obj/debug/*.dylib
+        files: .theos/obj/debug/*.dylib
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
