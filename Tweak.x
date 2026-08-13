@@ -336,8 +336,178 @@ static void startHTTPServer() {
     HLog(@"✅ HTTP服务器已启动: http://localhost:%d", HTTP_PORT);
 }
 
+// ============================================
+// 反越狱检测 Hook
+// ============================================
+
+// Hook stat - 防止检测越狱文件
+%hookf(int, stat, const char *path, struct stat *buf) {
+    if (path) {
+        NSString *pathStr = [NSString stringWithUTF8String:path];
+        // 拦截常见越狱检测路径
+        if ([pathStr containsString:@"Cydia"] ||
+            [pathStr containsString:@"cydia"] ||
+            [pathStr containsString:@"MobileSubstrate"] ||
+            [pathStr containsString:@"substrate"] ||
+            [pathStr containsString:@"/usr/bin/ssh"] ||
+            [pathStr containsString:@"/usr/sbin/sshd"] ||
+            [pathStr containsString:@"/bin/bash"] ||
+            [pathStr containsString:@"/usr/libexec/sftp-server"] ||
+            [pathStr containsString:@"/Applications/Sileo"] ||
+            [pathStr containsString:@"/Applications/Zebra"] ||
+            [pathStr containsString:@"/var/lib/apt"] ||
+            [pathStr containsString:@"/var/lib/dpkg"] ||
+            [pathStr containsString:@"/etc/apt"] ||
+            [pathStr containsString:@"/Library/Taurine"] ||
+            [pathStr containsString:@"/.installed_"] ||
+            [pathStr containsString:@"/jb/"]) {
+            HLog(@"🛡️ 拦截stat检测: %@", pathStr);
+            errno = ENOENT; // 文件不存在
+            return -1;
+        }
+    }
+    return %orig;
+}
+
+// Hook fopen - 防止读取越狱文件
+%hookf(FILE *, fopen, const char *path, const char *mode) {
+    if (path) {
+        NSString *pathStr = [NSString stringWithUTF8String:path];
+        if ([pathStr containsString:@"Cydia"] ||
+            [pathStr containsString:@"cydia"] ||
+            [pathStr containsString:@"/etc/fstab"] ||
+            [pathStr containsString:@"MobileSubstrate"] ||
+            [pathStr containsString:@"substrate"] ||
+            [pathStr containsString:@"Sileo"] ||
+            [pathStr containsString:@"Zebra"] ||
+            [pathStr containsString:@"/var/lib/apt"] ||
+            [pathStr containsString:@"/Library/Taurine"] ||
+            [pathStr containsString:@"/.installed_"]) {
+            HLog(@"🛡️ 拦截fopen检测: %@", pathStr);
+            errno = ENOENT;
+            return NULL;
+        }
+    }
+    return %orig;
+}
+
+// Hook access - 防止检测文件可访问性
+%hookf(int, access, const char *path, int mode) {
+    if (path) {
+        NSString *pathStr = [NSString stringWithUTF8String:path];
+        if ([pathStr containsString:@"Cydia"] ||
+            [pathStr containsString:@"cydia"] ||
+            [pathStr containsString:@"MobileSubstrate"] ||
+            [pathStr containsString:@"substrate"] ||
+            [pathStr containsString:@"/usr/bin/ssh"] ||
+            [pathStr containsString:@"Sileo"] ||
+            [pathStr containsString:@"Zebra"] ||
+            [pathStr containsString:@"/Library/Taurine"] ||
+            [pathStr containsString:@"/.installed_"]) {
+            HLog(@"🛡️ 拦截access检测: %@", pathStr);
+            errno = ENOENT;
+            return -1;
+        }
+    }
+    return %orig;
+}
+
+// Hook lstat - 防止检测符号链接
+%hookf(int, lstat, const char *path, struct stat *buf) {
+    if (path) {
+        NSString *pathStr = [NSString stringWithUTF8String:path];
+        if ([pathStr containsString:@"Cydia"] ||
+            [pathStr containsString:@"MobileSubstrate"] ||
+            [pathStr containsString:@"/Applications/"] ||
+            [pathStr containsString:@"Sileo"] ||
+            [pathStr containsString:@"Zebra"] ||
+            [pathStr containsString:@"/Library/Taurine"]) {
+            HLog(@"🛡️ 拦截lstat检测: %@", pathStr);
+            errno = ENOENT;
+            return -1;
+        }
+    }
+    return %orig;
+}
+
+// Hook getenv - 防止检测DYLD环境变量
+%hookf(char *, getenv, const char *name) {
+    if (name) {
+        NSString *nameStr = [NSString stringWithUTF8String:name];
+        if ([nameStr containsString:@"DYLD"] ||
+            [nameStr containsString:@"SUBSTRATE"] ||
+            [nameStr containsString:@"_MSSafeMode"]) {
+            HLog(@"🛡️ 拦截getenv检测: %@", nameStr);
+            return NULL;
+        }
+    }
+    return %orig;
+}
+
+// Hook fork - 防止沙盒逃逸检测
+%hookf(pid_t, fork) {
+    HLog(@"🛡️ 拦截fork检测");
+    errno = ENOSYS; // 功能不支持
+    return -1;
+}
+
+// Hook NSFileManager - 防止ObjC层文件检测
+%hook NSFileManager
+- (BOOL)fileExistsAtPath:(NSString *)path {
+    if ([path containsString:@"Cydia"] ||
+        [path containsString:@"cydia"] ||
+        [path containsString:@"MobileSubstrate"] ||
+        [path containsString:@"substrate"] ||
+        [path containsString:@"/usr/bin/ssh"] ||
+        [path containsString:@"Sileo"] ||
+        [path containsString:@"Zebra"] ||
+        [path containsString:@"/Library/Taurine"] ||
+        [path containsString:@"/.installed_"] ||
+        [path containsString:@"/jb/"]) {
+        HLog(@"🛡️ 拦截fileExistsAtPath检测: %@", path);
+        return NO;
+    }
+    return %orig;
+}
+
+- (BOOL)fileExistsAtPath:(NSString *)path isDirectory:(BOOL *)isDirectory {
+    if ([path containsString:@"Cydia"] ||
+        [path containsString:@"cydia"] ||
+        [path containsString:@"MobileSubstrate"] ||
+        [path containsString:@"substrate"] ||
+        [path containsString:@"Sileo"] ||
+        [path containsString:@"Zebra"] ||
+        [path containsString:@"/Library/Taurine"] ||
+        [path containsString:@"/.installed_"]) {
+        HLog(@"🛡️ 拦截fileExistsAtPath:isDirectory检测: %@", path);
+        return NO;
+    }
+    return %orig;
+}
+%end
+
+// Hook UIApplication - 防止canOpenURL检测越狱URL Scheme
+%hook UIApplication
+- (BOOL)canOpenURL:(NSURL *)url {
+    NSString *urlStr = url.absoluteString;
+    if ([urlStr containsString:@"cydia://"] ||
+        [urlStr containsString:@"sileo://"] ||
+        [urlStr containsString:@"zbra://"] ||
+        [urlStr containsString:@"filza://"] ||
+        [urlStr containsString:@"activator://"]) {
+        HLog(@"🛡️ 拦截canOpenURL检测: %@", urlStr);
+        return NO;
+    }
+    return %orig;
+}
+%end
+
 // 初始化
 %ctor {
+    HLog(@"========================================");
+    HLog(@"🛡️ 反越狱检测已启动");
+    HLog(@"========================================");
+
     capturedRequests = [[NSMutableArray alloc] init];
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -347,6 +517,7 @@ static void startHTTPServer() {
         HLog(@"✅ TikTok抓包插件已加载");
         HLog(@"📱 悬浮窗已显示");
         HLog(@"🌐 HTTP服务器: http://设备IP:%d", HTTP_PORT);
+        HLog(@"🛡️ 反越狱检测已激活");
         HLog(@"========================================");
     });
 }
