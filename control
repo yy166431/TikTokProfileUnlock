@@ -1,0 +1,9 @@
+Package: com.seagull.tiktokdump
+Name: TikTok Network Dump
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: 拦截TikTok/抖音个人中心网络请求，保存完整请求/响应数据到/var/mobile/Documents/TikTokDump/
+Maintainer: 海鸥 <seagull@example.com>
+Author: 海鸥
+Section: Tweaks
+Depends: mobilesubstrate
