@@ -13,8 +13,8 @@
 #import <sys/stat.h>
 #import <errno.h>
 
-// 日志服务器地址（你改成你的服务器IP）
-#define LOG_SERVER_URL @"http://YOUR_SERVER_IP:8899/log"
+// 日志服务器地址
+#define LOG_SERVER_URL @"http://159.75.14.193:8899/log"
 
 // 发送日志到服务器
 static void sendLogToServer(NSString *type, NSString *message) {
