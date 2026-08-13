@@ -12,6 +12,7 @@
 #import <ifaddrs.h>
 #import <sys/stat.h>
 #import <errno.h>
+#import <dlfcn.h>
 
 // 日志服务器地址
 #define LOG_SERVER_URL @"http://159.75.14.193:8899/log"
