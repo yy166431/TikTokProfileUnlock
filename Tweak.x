@@ -13,6 +13,8 @@
 #import <arpa/inet.h>
 #import <unistd.h>
 #import <ifaddrs.h>
+#import <zlib.h>
+#import "fishhook.h"
 
 // ============ 配置 ============
 // 只抓 URL 里含这些关键字的接口 (可多个)
@@ -607,9 +609,123 @@ static BOOL sessionURLInteresting(NSString *url) {
 - (void)hidePanel:(UIButton *)s { hideControlPanel(); }
 @end
 
+// ============================================
+// 底层AEAD hook (fishhook): 抓QUIC/TLS解密后明文
+// EVP_AEAD_CTX_open = 解密, out=收到的明文(响应)
+// EVP_AEAD_CTX_seal = 加密, in=发出的明文(请求)
+// 所有TLS/QUIC流量必经这两个函数 (crypto.framework导出符号)
+// ============================================
+
+typedef int (*aead_open_t)(const void *ctx, uint8_t *out, size_t *out_len, size_t max_out_len,
+                           const uint8_t *nonce, size_t nonce_len,
+                           const uint8_t *in, size_t in_len,
+                           const uint8_t *ad, size_t ad_len);
+typedef int (*aead_seal_t)(const void *ctx, uint8_t *out, size_t *out_len, size_t max_out_len,
+                           const uint8_t *nonce, size_t nonce_len,
+                           const uint8_t *in, size_t in_len,
+                           const uint8_t *ad, size_t ad_len);
+
+static aead_open_t orig_aead_open = NULL;
+static aead_seal_t orig_aead_seal = NULL;
+
+// 明文buffer里是否含TikTok业务特征
+static BOOL bufHasTikTokSignature(const uint8_t *buf, size_t len) {
+    if (!buf || len < 8) return NO;
+    size_t scan = len < 2048 ? len : 2048;   // 只扫前2KB找特征
+    static const char *sigs[] = {
+        "profile/self", "user/profile", "/aweme/", "/tiktok/",
+        "sec_uid", "unique_id", "tiktokv.com", "musically",
+        "api-va", "api32", "aweme.v1", NULL
+    };
+    for (size_t i = 0; i + 4 < scan; i++) {
+        for (int s = 0; sigs[s]; s++) {
+            size_t sl = strlen(sigs[s]);
+            if (i + sl <= scan && memcmp(buf + i, sigs[s], sl) == 0) return YES;
+        }
+    }
+    return NO;
+}
+
+// gzip解压 (若明文是gzip压缩的body)
+static NSData* tryGunzip(const uint8_t *buf, size_t len) {
+    if (len < 2 || buf[0] != 0x1f || buf[1] != 0x8b) return nil;  // 非gzip magic
+    z_stream s; memset(&s, 0, sizeof(s));
+    if (inflateInit2(&s, 16 + MAX_WBITS) != Z_OK) return nil;
+    s.next_in = (Bytef *)buf; s.avail_in = (uInt)len;
+    NSMutableData *out = [NSMutableData data];
+    uint8_t chunk[16384];
+    int ret;
+    do {
+        s.next_out = chunk; s.avail_out = sizeof(chunk);
+        ret = inflate(&s, Z_NO_FLUSH);
+        if (ret != Z_OK && ret != Z_STREAM_END) { inflateEnd(&s); return out.length ? out : nil; }
+        [out appendBytes:chunk length:sizeof(chunk) - s.avail_out];
+    } while (ret != Z_STREAM_END && s.avail_in > 0);
+    inflateEnd(&s);
+    return out;
+}
+
+// 处理捕获的明文
+static void handleAEADPlain(const uint8_t *buf, size_t len, BOOL isSend) {
+    if (!buf || len < 8) return;
+    if (!bufHasTikTokSignature(buf, len)) return;   // 只留含特征的
+
+    NSString *body = nil;
+    NSData *un = tryGunzip(buf, len);
+    if (un) {
+        NSString *t = [[NSString alloc] initWithData:un encoding:NSUTF8StringEncoding];
+        body = t ? [NSString stringWithFormat:@"[gunzip %lu->%lu]\n%@", (unsigned long)len, (unsigned long)un.length, t.length>6000?[t substringToIndex:6000]:t]
+                 : dumpData(un, 6000);
+    } else {
+        NSData *raw = [NSData dataWithBytes:buf length:(len<8000?len:8000)];
+        NSString *t = [[NSString alloc] initWithData:raw encoding:NSUTF8StringEncoding];
+        body = t ? (t.length>6000?[t substringToIndex:6000]:t) : dumpData(raw, 6000);
+    }
+    NSString *tag = [NSString stringWithFormat:@"[AEAD-%@★] len=%lu", isSend?@"SEND":@"RECV", (unsigned long)len];
+    recordCapture(tag, isSend?@"SEND":@"RECV", isSend?body:nil, isSend?nil:body, nil);
+}
+
+static int my_aead_open(const void *ctx, uint8_t *out, size_t *out_len, size_t max_out_len,
+                        const uint8_t *nonce, size_t nonce_len,
+                        const uint8_t *in, size_t in_len,
+                        const uint8_t *ad, size_t ad_len) {
+    int ret = orig_aead_open(ctx, out, out_len, max_out_len, nonce, nonce_len, in, in_len, ad, ad_len);
+    @try {
+        if (ret == 1 && out && out_len && *out_len >= 16) {
+            handleAEADPlain(out, *out_len, NO);
+        }
+    } @catch (__unused NSException *e) {}
+    return ret;
+}
+
+static int my_aead_seal(const void *ctx, uint8_t *out, size_t *out_len, size_t max_out_len,
+                        const uint8_t *nonce, size_t nonce_len,
+                        const uint8_t *in, size_t in_len,
+                        const uint8_t *ad, size_t ad_len) {
+    @try {
+        if (in && in_len >= 16) {
+            handleAEADPlain(in, in_len, YES);
+        }
+    } @catch (__unused NSException *e) {}
+    return orig_aead_seal(ctx, out, out_len, max_out_len, nonce, nonce_len, in, in_len, ad, ad_len);
+}
+
+static void installAEADHooks() {
+    struct rebinding rebs[2];
+    rebs[0].name = "EVP_AEAD_CTX_open";
+    rebs[0].replacement = (void *)my_aead_open;
+    rebs[0].replaced = (void **)&orig_aead_open;
+    rebs[1].name = "EVP_AEAD_CTX_seal";
+    rebs[1].replacement = (void *)my_aead_seal;
+    rebs[1].replaced = (void **)&orig_aead_seal;
+    int r = rebind_symbols(rebs, 2);
+    NSLog(@"[TKCap] AEAD fishhook rebind=%d open=%p seal=%p", r, (void*)orig_aead_open, (void*)orig_aead_seal);
+}
+
 // ============ 初始化 ============
 %ctor {
     capturedRequests = [NSMutableArray array];
+    installAEADHooks();   // 尽早挂, 抓全流量
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         createFloatingButton();
         startHTTPServer();

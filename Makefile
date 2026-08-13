@@ -5,10 +5,11 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = TikTokProfileUnlock
 
-TikTokProfileUnlock_FILES = Tweak.x
+TikTokProfileUnlock_FILES = Tweak.x fishhook.c
 TikTokProfileUnlock_CFLAGS = -fobjc-arc
 TikTokProfileUnlock_FRAMEWORKS = UIKit Foundation CFNetwork
 TikTokProfileUnlock_PRIVATE_FRAMEWORKS =
 TikTokProfileUnlock_LDFLAGS = -undefined dynamic_lookup
+TikTokProfileUnlock_LIBRARIES = z
 
 include $(THEOS)/makefiles/tweak.mk
