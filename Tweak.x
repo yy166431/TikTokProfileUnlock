@@ -372,8 +372,7 @@ static id handleRespSerializer(id response, id data, id retval) {
     return retval;
 }
 
-// 14个类逐个展开 (logos不展开C宏里的%hook指令, 必须手写)
-%group RespHooks
+// 14个类逐个展开 (顶层%hook, logos自动初始化, 不用%group/%init)
 
 %hook TTHTTPBinaryResponseSerializerBase
 - (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
@@ -431,13 +430,10 @@ static id handleRespSerializer(id response, id data, id retval) {
 - (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
 %end
 
-%end // group RespHooks
-
 // ============================================
 // 请求侧 hook: TTHTTPRequestSerializerBaseChromium
 // 返回的 NSURLRequest 里 .HTTPBody 是加密前明文
 // ============================================
-%group ReqHooks
 
 %hook TTHTTPRequestSerializerBaseChromium
 
@@ -477,8 +473,6 @@ static id handleRespSerializer(id response, id data, id retval) {
 
 %end
 
-%end // group ReqHooks
-
 // ============ UIButton category ============
 @implementation UIButton (DragSupport)
 - (void)handleLongPress:(UILongPressGestureRecognizer *)r {
@@ -498,8 +492,6 @@ static id handleRespSerializer(id response, id data, id retval) {
 // ============ 初始化 ============
 %ctor {
     capturedRequests = [NSMutableArray array];
-    %init(RespHooks);
-    %init(ReqHooks);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         createFloatingButton();
         startHTTPServer();
