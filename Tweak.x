@@ -271,15 +271,18 @@ static void startHTTPServer() {
         // Hook completionHandler
         void (^newHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
             if (data && response) {
-                NSString *responseBody = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-
-                // 格式化JSON响应体
-                NSString *prettyJSON = responseBody;
+                // 先尝试解析JSON格式化，如果失败就用Base64保存原始数据
+                NSString *responseBody = nil;
                 NSError *jsonError = nil;
                 id jsonObj = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
+
                 if (jsonObj && !jsonError) {
+                    // JSON数据，格式化输出
                     NSData *prettyData = [NSJSONSerialization dataWithJSONObject:jsonObj options:NSJSONWritingPrettyPrinted error:nil];
-                    prettyJSON = [[NSString alloc] initWithData:prettyData encoding:NSUTF8StringEncoding];
+                    responseBody = [[NSString alloc] initWithData:prettyData encoding:NSUTF8StringEncoding];
+                } else {
+                    // 非JSON或乱码，用Base64编码保存原始数据
+                    responseBody = [NSString stringWithFormat:@"[Base64] %@", [data base64EncodedStringWithOptions:0]];
                 }
 
                 // 收集响应头（重要！包括服务器返回的所有头）
@@ -298,7 +301,7 @@ static void startHTTPServer() {
                         @"url": urlString,
                         @"method": request.HTTPMethod ?: @"GET",
                         @"headers": headers,
-                        @"response": prettyJSON ?: @"(无法解析响应)",
+                        @"response": responseBody ?: @"(空响应)",
                         @"responseHeaders": responseHeaders
                     } mutableCopy];
 
