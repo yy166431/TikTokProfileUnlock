@@ -194,7 +194,7 @@ static void createFloatingButton() {
         topWindow.windowLevel = UIWindowLevelAlert + 1;
         topWindow.backgroundColor = [UIColor clearColor];
         topWindow.hidden = NO;
-        topWindow.userInteractionEnabled = YES;
+        topWindow.userInteractionEnabled = NO; // 整个window不响应事件，只让按钮响应
         [topWindow addSubview:floatingButton];
 
         // 存储window引用防止释放
@@ -209,7 +209,13 @@ static void createFloatingButton() {
         UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:floatingButton action:@selector(onButtonTap:)];
         [floatingButton addGestureRecognizer:tap];
 
+        // 关键：只有按钮本身响应事件
         floatingButton.userInteractionEnabled = YES;
+
+        // 让按钮能接收topWindow之外的点击事件
+        topWindow.userInteractionEnabled = YES;
+        topWindow.rootViewController = [[UIViewController alloc] init];
+        topWindow.rootViewController.view.userInteractionEnabled = NO; // rootView不响应
 
         HLog(@"悬浮窗已创建");
     });
