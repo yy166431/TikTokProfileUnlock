@@ -14,7 +14,11 @@
 #import <unistd.h>
 #import <ifaddrs.h>
 #import <zlib.h>
+#import <dlfcn.h>
+#import <mach-o/dyld.h>
 #import "fishhook.h"
+
+// substrate inline hook (ElleKit/CydiaSubstrate 提供, 弱链接: 运行时判断可用性)
 
 // ============ 配置 ============
 // 只抓 URL 里含这些关键字的接口 (可多个)
@@ -734,16 +738,39 @@ static int my_aead_seal(const void *ctx, uint8_t *out, size_t *out_len, size_t m
     return orig_aead_seal(ctx, out, out_len, max_out_len, nonce, nonce_len, in, in_len, ad, ad_len);
 }
 
+typedef void (*MSHookFunction_t)(void *symbol, void *replace, void **result);
+
 static void installAEADHooks() {
-    struct rebinding rebs[2];
-    rebs[0].name = "EVP_AEAD_CTX_open";
-    rebs[0].replacement = (void *)my_aead_open;
-    rebs[0].replaced = (void **)&orig_aead_open;
-    rebs[1].name = "EVP_AEAD_CTX_seal";
-    rebs[1].replacement = (void *)my_aead_seal;
-    rebs[1].replaced = (void **)&orig_aead_seal;
-    int r = rebind_symbols(rebs, 2);
-    NSLog(@"[TKCap] AEAD fishhook rebind=%d open=%p seal=%p", r, (void*)orig_aead_open, (void*)orig_aead_seal);
+    // 关键: 用 inline hook 挂函数本体, 覆盖所有调用者(含 MusicallyCore 在 __DATA_CONST GOT 里的 QUIC 链路)
+    // fishhook 只改 __DATA 的 GOT, 抓不到 __DATA_CONST 的 QUIC —— 这是之前 profile/self 漏抓的真因
+    void *p_open = dlsym(RTLD_DEFAULT, "EVP_AEAD_CTX_open");
+    void *p_seal = dlsym(RTLD_DEFAULT, "EVP_AEAD_CTX_seal");
+    // 运行时找 MSHookFunction(ElleKit/Substitute/CydiaSubstrate 任一注入环境都导出它), 零编译依赖
+    MSHookFunction_t mshook = (MSHookFunction_t)dlsym(RTLD_DEFAULT, "MSHookFunction");
+    NSLog(@"[TKCap] dlsym open=%p seal=%p MSHook=%p", p_open, p_seal, (void*)mshook);
+
+    BOOL usedInline = NO;
+    if (mshook && p_open && p_seal) {
+        mshook(p_open, (void *)my_aead_open, (void **)&orig_aead_open);
+        mshook(p_seal, (void *)my_aead_seal, (void **)&orig_aead_seal);
+        usedInline = (orig_aead_open != NULL && orig_aead_seal != NULL);
+    }
+
+    // 兜底: 若 inline hook 不可用, 退回 fishhook(至少还能抓走 __DATA GOT 的直播/TLS 流量)
+    if (!usedInline) {
+        struct rebinding rebs[2];
+        rebs[0].name = "EVP_AEAD_CTX_open";
+        rebs[0].replacement = (void *)my_aead_open;
+        rebs[0].replaced = (void **)&orig_aead_open;
+        rebs[1].name = "EVP_AEAD_CTX_seal";
+        rebs[1].replacement = (void *)my_aead_seal;
+        rebs[1].replaced = (void **)&orig_aead_seal;
+        rebind_symbols(rebs, 2);
+    }
+    NSString *s = [NSString stringWithFormat:@"[TKCap] AEAD hook 方式=%@ open=%p seal=%p",
+                   usedInline?@"INLINE(MSHook)":@"fishhook兜底", (void*)orig_aead_open, (void*)orig_aead_seal];
+    NSLog(@"%@", s);
+    sendLogToServer(@"info", s);
 }
 
 // ============ 初始化 ============
