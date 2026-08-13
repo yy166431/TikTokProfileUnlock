@@ -4,6 +4,7 @@
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 #import <sys/socket.h>
 #import <netinet/in.h>
 #import <arpa/inet.h>
@@ -60,16 +61,26 @@ static void createFloatingButton() {
         floatingButton.backgroundColor = [[UIColor redColor] colorWithAlphaComponent:0.8];
         floatingButton.layer.cornerRadius = 40;
         floatingButton.layer.masksToBounds = YES;
-        [floatingButton setTitle:@"抓包\n0" forState:UIControlStateNormal];
+        [floatingButton setTitle:@"运行中\n0" forState:UIControlStateNormal];
         floatingButton.titleLabel.numberOfLines = 2;
         floatingButton.titleLabel.textAlignment = NSTextAlignmentCenter;
-        floatingButton.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+        floatingButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
+
+        // 确保在最顶层显示
+        UIWindow *topWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+        topWindow.windowLevel = UIWindowLevelAlert + 1;
+        topWindow.backgroundColor = [UIColor clearColor];
+        topWindow.hidden = NO;
+        topWindow.userInteractionEnabled = YES;
+        [topWindow addSubview:floatingButton];
+
+        // 存储window引用防止释放
+        objc_setAssociatedObject(floatingButton, "topWindow", topWindow, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
         // 添加拖动手势
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:floatingButton action:@selector(handlePan:)];
         [floatingButton addGestureRecognizer:pan];
 
-        [keyWindow addSubview:floatingButton];
         floatingButton.userInteractionEnabled = YES;
 
         HLog(@"悬浮窗已创建");
@@ -80,7 +91,7 @@ static void createFloatingButton() {
 static void updateFloatingButton() {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (floatingButton) {
-            [floatingButton setTitle:[NSString stringWithFormat:@"抓包\n%d", captureCount] forState:UIControlStateNormal];
+            [floatingButton setTitle:[NSString stringWithFormat:@"运行中\n%d", captureCount] forState:UIControlStateNormal];
         }
     });
 }
