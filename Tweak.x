@@ -656,3 +656,113 @@ static void startHTTPServer() {
     hideControlPanel();
 }
 @end
+
+// ============================================
+// BDTuring风控绕过 - 解决"无网络连接"问题
+// ============================================
+
+// 生成随机19位device_id
+static NSString* generateRandomDeviceID() {
+    static NSString *cachedDeviceID = nil;
+    if (cachedDeviceID) return cachedDeviceID;
+
+    // 生成19位随机数字
+    NSMutableString *deviceID = [NSMutableString stringWithString:@"7"];
+    for (int i = 0; i < 18; i++) {
+        [deviceID appendFormat:@"%d", arc4random_uniform(10)];
+    }
+    cachedDeviceID = [deviceID copy];
+    HLog(@"🔑 生成随机device_id: %@", cachedDeviceID);
+    return cachedDeviceID;
+}
+
+// Hook BDTuring风控验证
+%hook BDTuringSparkManager
+- (void)verifyWithCompletion:(void (^)(id))completion {
+    HLog(@"🛡️ 拦截BDTuring验证，强制返回成功");
+
+    // 伪造成功结果
+    id result = [[objc_getClass("BDTuringVerifyResult") alloc] init];
+    if (result) {
+        [result setValue:@YES forKey:@"isSuccess"];
+        [result setValue:@"bypass" forKey:@"verifyId"];
+    }
+
+    if (completion) {
+        completion(result);
+    }
+}
+
+- (void)loadSettings:(id)settings completion:(void (^)(id))completion {
+    HLog(@"🛡️ 拦截BDTuring配置加载");
+    if (completion) {
+        completion(nil);
+    }
+}
+%end
+
+// Hook网络可达性检测
+%hook NetworkReachabilityManager
+- (BOOL)isReachable {
+    HLog(@"🛡️ 强制网络可达: YES");
+    return YES;
+}
+
+- (BOOL)isReachableViaWiFi {
+    return YES;
+}
+
+- (BOOL)isReachableViaWWAN {
+    return YES;
+}
+
+- (int)currentReachabilityStatus {
+    return 2; // ReachableViaWiFi
+}
+%end
+
+// Hook设备ID - 随机生成干净的device_id
+%hook NSUserDefaults
+- (id)objectForKey:(NSString *)key {
+    if ([key containsString:@"DeviceID"] || [key isEqualToString:@"kDeviceIDStorageKey"]) {
+        NSString *fakeID = generateRandomDeviceID();
+        HLog(@"🛡️ 替换device_id: %@", fakeID);
+        return fakeID;
+    }
+    return %orig;
+}
+
+- (void)setObject:(id)value forKey:(NSString *)key {
+    // 阻止保存被污染的device_id
+    if ([key containsString:@"DeviceID"] || [key isEqualToString:@"kDeviceIDStorageKey"]) {
+        HLog(@"🛡️ 阻止保存device_id");
+        return;
+    }
+    %orig;
+}
+%end
+
+// Hook网络错误处理 - 吞掉风控错误
+%hook TTNetworkManager
+- (void)handleNetworkError:(NSError *)error {
+    if (error) {
+        HLog(@"🛡️ 拦截网络错误: %@", error.localizedDescription);
+        // 不调用原方法，吞掉错误
+        return;
+    }
+    %orig;
+}
+%end
+
+// Hook AAWEBootChecker - 绕过启动检测
+%hook AAWEBootChecker
++ (void)load {
+    HLog(@"🛡️ 拦截AAWEBootChecker加载");
+    // 不执行原load方法
+}
+
+- (BOOL)shouldCheckTargetPath:(NSString *)path {
+    HLog(@"🛡️ 跳过路径检测: %@", path);
+    return NO;
+}
+%end
