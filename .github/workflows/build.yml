@@ -26,7 +26,11 @@ jobs:
         curl -LO https://github.com/theos/sdks/archive/master.zip
         unzip master.zip
         mv sdks-master/* $THEOS/sdks/
-        
+
+    - name: Install ldid
+      run: |
+        brew install ldid
+
     - name: Build
       run: |
         make clean
