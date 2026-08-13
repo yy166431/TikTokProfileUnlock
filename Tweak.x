@@ -67,6 +67,20 @@ static CFSocketRef serverSocket = NULL;
 - (void)hidePanel:(UIButton *)sender;
 @end
 
+// 穿透窗: 只有子视图(按钮)区域响应触摸, 其余全部穿透给下层(TikTok)
+// 这是关键 —— 全屏UIWindow若不穿透会吃掉所有触摸, 导致TikTok"卡死"(无法交互)
+@interface TKPassWindow : UIWindow
+@end
+@implementation TKPassWindow
+- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
+    for (UIView *sub in self.subviews) {
+        if (!sub.hidden && sub.userInteractionEnabled && CGRectContainsPoint(sub.frame, point))
+            return YES;
+    }
+    return NO;  // 非子视图区域 -> 不接管, 事件穿透到TikTok
+}
+@end
+
 // ============ 工具 ============
 static UIWindow *getKeyWindow() {
     UIWindow *keyWindow = nil;
@@ -179,16 +193,17 @@ static void hideControlPanel();
 static void createFloatingButton() {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (floatingWindow && floatingButton) return;
-        floatingWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+        floatingWindow = [[TKPassWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
         floatingWindow.windowLevel = UIWindowLevelAlert + 100;
         floatingWindow.backgroundColor = [UIColor clearColor];
         floatingWindow.userInteractionEnabled = YES;
-        floatingWindow.hidden = NO;
         if (@available(iOS 13.0, *)) {
             for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
                 if ([scene isKindOfClass:[UIWindowScene class]]) { floatingWindow.windowScene = (UIWindowScene *)scene; break; }
             }
         }
+        // 关键: 只显示不抢key, 避免劫持TikTok的键盘/焦点/事件链
+        floatingWindow.hidden = NO;
         floatingButton = [UIButton buttonWithType:UIButtonTypeCustom];
         floatingButton.frame = CGRectMake(20, 120, 70, 70);
         floatingButton.backgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.85];
@@ -206,8 +221,8 @@ static void createFloatingButton() {
         [floatingButton addGestureRecognizer:tap];
 
         [floatingWindow addSubview:floatingButton];
-        [floatingWindow makeKeyAndVisible];
-        HLog(@"悬浮窗已创建");
+        floatingWindow.hidden = NO;   // 只可见, 不makeKey
+        HLog(@"悬浮窗已创建(穿透窗)");
     });
 }
 
