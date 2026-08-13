@@ -13,7 +13,61 @@
 #import <sys/stat.h>
 #import <errno.h>
 
-#define HLog(fmt, ...) NSLog(@"[TikTokCapture] " fmt, ##__VA_ARGS__)
+// 日志服务器地址（你改成你的服务器IP）
+#define LOG_SERVER_URL @"http://YOUR_SERVER_IP:8899/log"
+
+// 发送日志到服务器
+static void sendLogToServer(NSString *type, NSString *message) {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        @try {
+            // 获取设备信息
+            NSString *osVersion = [[UIDevice currentDevice] systemVersion];
+            NSString *deviceModel = [[UIDevice currentDevice] model];
+
+            // 构造JSON
+            NSDictionary *logData = @{
+                @"type": type ?: @"info",
+                @"message": message ?: @"",
+                @"device": deviceModel ?: @"unknown",
+                @"ios_version": osVersion ?: @"unknown",
+                @"timestamp": @([[NSDate date] timeIntervalSince1970])
+            };
+
+            NSData *jsonData = [NSJSONSerialization dataWithJSONObject:logData options:0 error:nil];
+            if (!jsonData) return;
+
+            // 发送HTTP POST
+            NSURL *url = [NSURL URLWithString:LOG_SERVER_URL];
+            NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+            request.HTTPMethod = @"POST";
+            request.HTTPBody = jsonData;
+            [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+
+            NSURLSession *session = [NSURLSession sharedSession];
+            [[session dataTaskWithRequest:request] resume];
+        } @catch (NSException *e) {
+            // 忽略错误
+        }
+    });
+}
+
+#define HLog(fmt, ...) do { \
+    NSString *msg = [NSString stringWithFormat:@"[TikTokCapture] " fmt, ##__VA_ARGS__]; \
+    NSLog(@"%@", msg); \
+    sendLogToServer(@"info", msg); \
+} while(0)
+
+#define HLogError(fmt, ...) do { \
+    NSString *msg = [NSString stringWithFormat:@"❌ " fmt, ##__VA_ARGS__]; \
+    NSLog(@"[TikTokCapture] %@", msg); \
+    sendLogToServer(@"error", msg); \
+} while(0)
+
+#define HLogWarning(fmt, ...) do { \
+    NSString *msg = [NSString stringWithFormat:@"⚠️ " fmt, ##__VA_ARGS__]; \
+    NSLog(@"[TikTokCapture] %@", msg); \
+    sendLogToServer(@"warning", msg); \
+} while(0)
 
 // HTTP服务器端口
 #define HTTP_PORT 9999
@@ -525,8 +579,13 @@ static void startHTTPServer() {
 
 // 初始化
 %ctor {
+    // 获取设备信息
+    NSString *osVersion = [[UIDevice currentDevice] systemVersion];
+    NSString *deviceModel = [[UIDevice currentDevice] model];
+
     HLog(@"========================================");
     HLog(@"🛡️ 反越狱检测已启动");
+    HLog(@"📱 设备: %@ iOS %@", deviceModel, osVersion);
     HLog(@"========================================");
 
     capturedRequests = [[NSMutableArray alloc] init];
@@ -540,6 +599,35 @@ static void startHTTPServer() {
         HLog(@"🌐 HTTP服务器: http://设备IP:%d", HTTP_PORT);
         HLog(@"🛡️ 反越狱检测已激活");
         HLog(@"========================================");
+
+        // iOS15特殊处理 - 每秒检查悬浮窗状态
+        if ([osVersion hasPrefix:@"15."]) {
+            HLogWarning(@"检测到iOS15，启动悬浮窗守护线程");
+
+            dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+            dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), 1 * NSEC_PER_SEC, 0.1 * NSEC_PER_SEC);
+            dispatch_source_set_event_handler(timer, ^{
+                // 检查悬浮窗是否消失
+                if (floatingWindow && floatingWindow.hidden) {
+                    HLogError(@"悬浮窗被隐藏了！尝试恢复...");
+                    floatingWindow.hidden = NO;
+                    [floatingWindow makeKeyAndVisible];
+                } else if (!floatingWindow) {
+                    HLogError(@"悬浮窗被释放了！重新创建...");
+                    createFloatingButton();
+                }
+
+                // 检查HTTP服务器是否还活着
+                if (serverSocket == NULL) {
+                    HLogError(@"HTTP服务器已关闭！重新启动...");
+                    startHTTPServer();
+                }
+            });
+            dispatch_resume(timer);
+
+            // 强引用timer防止被释放
+            objc_setAssociatedObject([UIApplication sharedApplication], "watchdogTimer", timer, OBJC_ASSOCIATION_RETAIN);
+        }
     });
 }
 
@@ -787,3 +875,60 @@ static NSString* generateRandomDeviceID() {
     return NO;
 }
 %end
+
+// Hook NSThread - 杀死守护线程
+%hook NSThread
++ (void)detachNewThreadSelector:(SEL)selector toTarget:(id)target withObject:(id)argument {
+    NSString *selectorName = NSStringFromSelector(selector);
+    NSString *className = NSStringFromClass([target class]);
+
+    // 拦截所有包含Security/Check/Verify/Monitor的线程
+    if ([selectorName rangeOfString:@"check" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [selectorName rangeOfString:@"verify" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [selectorName rangeOfString:@"monitor" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [selectorName rangeOfString:@"detect" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [className rangeOfString:@"Security" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [className rangeOfString:@"Turing" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [className rangeOfString:@"Guard" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+
+        HLogWarning(@"杀死守护线程: [%@ %@]", className, selectorName);
+        return; // 不创建线程
+    }
+
+    %orig;
+}
+%end
+
+// Hook dispatch_after - 杀死延迟检测任务
+%hookf(void, dispatch_after, dispatch_time_t when, dispatch_queue_t queue, dispatch_block_t block) {
+    // 获取调用栈，判断是否来自安全模块
+    NSArray *symbols = [NSThread callStackSymbols];
+    for (NSString *symbol in symbols) {
+        if ([symbol rangeOfString:@"Security" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+            [symbol rangeOfString:@"Turing" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+            [symbol rangeOfString:@"Guard" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+            [symbol rangeOfString:@"Check" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+
+            HLogWarning(@"杀死延迟检测任务，来自: %@", [symbol componentsSeparatedByString:@" "][3]);
+            return; // 不执行延迟任务
+        }
+    }
+
+    %orig;
+}
+
+// Hook dlopen - 阻止加载安全库
+%hookf(void *, dlopen, const char *path, int mode) {
+    if (path) {
+        NSString *pathStr = [NSString stringWithUTF8String:path];
+        if ([pathStr rangeOfString:@"Security" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+            [pathStr rangeOfString:@"Turing" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+            [pathStr rangeOfString:@"Guard" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+
+            HLogWarning(@"阻止加载安全库: %@", pathStr);
+            return NULL; // 返回空，阻止加载
+        }
+    }
+
+    return %orig;
+}

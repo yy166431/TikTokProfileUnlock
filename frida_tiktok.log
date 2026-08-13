@@ -1,0 +1,29 @@
+     ____
+    / _  |   Frida 17.17.0 - A world-class dynamic instrumentation toolkit
+   | (_| |
+    > _  |   Commands:
+   /_/ |_|       help      -> Displays the help system
+   . . . .       object?   -> Display information about 'object'
+   . . . .       exit/quit -> Exit
+   . . . .
+   . . . .   Prefer a GUI? Luma is the official Frida app, with a live REPL,
+   . . . .   persistent sessions & collaboration. https://luma.frida.re/
+   . . . .
+   . . . .   Connected to Apple iPhone (id=00008101-00193D620288001E)
+Spawning `com.zhiliaoapp.musically`...
+
+[*] ====== TikTok网络诊断启动 ======
+
+[-] 未找到 BDTuringSparkManager
+[-] 未找到 NetworkReachabilityManager
+[+] 找到 TTHttpTask
+[+] 找到 TTNetworkManager
+[+] Hook NSUserDefaults
+[+] Hook NSURLSession
+
+[*] ====== Hook安装完成，开始监控 ======
+
+Spawned `com.zhiliaoapp.musically`. Resuming main thread!
+[Apple iPhone::com.zhiliaoapp.musically ]-> Device lost
+
+Thank you for using Frida!
