@@ -372,62 +372,104 @@ static id handleRespSerializer(id response, id data, id retval) {
     return retval;
 }
 
-// 14个类逐个展开 (顶层%hook, logos自动初始化, 不用%group/%init)
+// 14个类逐个展开 (顶层%hook, 方法体多行写, 避免logos单行解析bug)
 
 %hook TTHTTPBinaryResponseSerializerBase
-- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 {
+    id ret = %orig;
+    return handleRespSerializer(response, data, ret);
+}
 %end
 
 %hook AWEBinaryResponseSerializer
-- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 {
+    id ret = %orig;
+    return handleRespSerializer(response, data, ret);
+}
 %end
 
 %hook AWEBinaryResponseSerializerForJSON
-- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 {
+    id ret = %orig;
+    return handleRespSerializer(response, data, ret);
+}
 %end
 
 %hook AWEFeedPbResponseSerializer
-- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 {
+    id ret = %orig;
+    return handleRespSerializer(response, data, ret);
+}
 %end
 
 %hook BDXBridgePbResponseSerializer
-- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 {
+    id ret = %orig;
+    return handleRespSerializer(response, data, ret);
+}
 %end
 
 %hook HTSLivePBResponseSerializer
-- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 {
+    id ret = %orig;
+    return handleRespSerializer(response, data, ret);
+}
 %end
 
 %hook TIMClientTTNetworkImpResponseSerializer
-- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 {
+    id ret = %orig;
+    return handleRespSerializer(response, data, ret);
+}
 %end
 
 %hook TTIMStreakPBResponseSerializer
-- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 {
+    id ret = %orig;
+    return handleRespSerializer(response, data, ret);
+}
 %end
 
 %hook TTKECProtobufResponseSerializer
-- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 {
+    id ret = %orig;
+    return handleRespSerializer(response, data, ret);
+}
 %end
 
 %hook TTKFeedBasePbResponseSerializer
-- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 {
+    id ret = %orig;
+    return handleRespSerializer(response, data, ret);
+}
 %end
 
 %hook TTKLandscapePostPbResponseSerializer
-- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 {
+    id ret = %orig;
+    return handleRespSerializer(response, data, ret);
+}
 %end
 
 %hook TTKLanscapeFeedPbResponseSerializer
-- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 {
+    id ret = %orig;
+    return handleRespSerializer(response, data, ret);
+}
 %end
 
 %hook TTKPaidContentPbBaseResponseSerializer
-- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 {
+    id ret = %orig;
+    return handleRespSerializer(response, data, ret);
+}
 %end
 
 %hook TikTokKidsFeedPbResponseSerializer
-- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 {
+    id ret = %orig;
+    return handleRespSerializer(response, data, ret);
+}
 %end
 
 // ============================================
