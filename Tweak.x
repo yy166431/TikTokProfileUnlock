@@ -10,6 +10,8 @@
 #import <arpa/inet.h>
 #import <unistd.h>
 #import <ifaddrs.h>
+#import <sys/stat.h>
+#import <errno.h>
 
 #define HLog(fmt, ...) NSLog(@"[TikTokCapture] " fmt, ##__VA_ARGS__)
 
