@@ -62,6 +62,14 @@ static NSMutableArray *capturedRequests = nil;   // 每条: {time,url,method,req
 static int captureCount = 0;
 static CFSocketRef serverSocket = NULL;
 
+// AEAD 诊断计数器 —— 判定 profile/self 到底走没走这两个函数
+static volatile long g_open_calls = 0;   // 解密总次数
+static volatile long g_seal_calls = 0;   // 加密总次数
+static volatile long g_open_sig  = 0;    // 解密命中业务特征
+static volatile long g_seal_sig  = 0;    // 加密命中业务特征
+static volatile long g_open_max  = 0;    // 见过的最大解密明文长度
+static volatile long g_seal_max  = 0;
+
 @interface UIButton (DragSupport)
 - (void)handleLongPress:(UILongPressGestureRecognizer *)recognizer;
 - (void)onButtonTap:(UITapGestureRecognizer *)recognizer;
@@ -628,16 +636,28 @@ typedef int (*aead_seal_t)(const void *ctx, uint8_t *out, size_t *out_len, size_
 static aead_open_t orig_aead_open = NULL;
 static aead_seal_t orig_aead_seal = NULL;
 
-// 明文buffer里是否含TikTok业务特征
+// 明文buffer里是否含TikTok业务特征 (扫全长, 不再只扫前2KB)
 static BOOL bufHasTikTokSignature(const uint8_t *buf, size_t len) {
     if (!buf || len < 8) return NO;
-    size_t scan = len < 2048 ? len : 2048;   // 只扫前2KB找特征
+    size_t scan = len < 65536 ? len : 65536;   // 扫前64KB
     static const char *sigs[] = {
-        "profile/self", "user/profile", "/aweme/", "/tiktok/",
-        "sec_uid", "unique_id", "tiktokv.com", "musically",
-        "api-va", "api32", "aweme.v1", NULL
+        // 目标接口
+        "profile/self", "user/profile",
+        // 业务路径/域名
+        "/aweme/", "/tiktok/", "aweme.v1", "aweme/v1", "/passport/",
+        "tiktokv.com", "musical.ly", "musically", "api-va", "api32",
+        "api16", "api19", "api21", "tiktokcdn", "byteoversea",
+        // 个人资料字段 (protobuf 里以 ASCII key 出现)
+        "sec_uid", "unique_id", "sec_user_id", "follower_count",
+        "following_count", "aweme_count", "nickname\"", "signature\"",
+        "sslocal://", "aweme://", "snssdk", "share_url",
+        NULL
     };
     for (size_t i = 0; i + 4 < scan; i++) {
+        uint8_t c = buf[i];
+        if (c != '/' && c != 's' && c != 'u' && c != 'a' && c != 't' &&
+            c != 'm' && c != 'n' && c != 'f' && c != 'p' && c != 'b' && c != 'i')
+            continue;   // 快速跳过, 首字母不匹配任一sig
         for (int s = 0; sigs[s]; s++) {
             size_t sl = strlen(sigs[s]);
             if (i + sl <= scan && memcmp(buf + i, sigs[s], sl) == 0) return YES;
@@ -692,7 +712,9 @@ static int my_aead_open(const void *ctx, uint8_t *out, size_t *out_len, size_t m
     int ret = orig_aead_open(ctx, out, out_len, max_out_len, nonce, nonce_len, in, in_len, ad, ad_len);
     @try {
         if (ret == 1 && out && out_len && *out_len >= 16) {
-            handleAEADPlain(out, *out_len, NO);
+            g_open_calls++;
+            if ((long)*out_len > g_open_max) g_open_max = (long)*out_len;
+            if (bufHasTikTokSignature(out, *out_len)) { g_open_sig++; handleAEADPlain(out, *out_len, NO); }
         }
     } @catch (__unused NSException *e) {}
     return ret;
@@ -704,7 +726,9 @@ static int my_aead_seal(const void *ctx, uint8_t *out, size_t *out_len, size_t m
                         const uint8_t *ad, size_t ad_len) {
     @try {
         if (in && in_len >= 16) {
-            handleAEADPlain(in, in_len, YES);
+            g_seal_calls++;
+            if ((long)in_len > g_seal_max) g_seal_max = (long)in_len;
+            if (bufHasTikTokSignature(in, in_len)) { g_seal_sig++; handleAEADPlain(in, in_len, YES); }
         }
     } @catch (__unused NSException *e) {}
     return orig_aead_seal(ctx, out, out_len, max_out_len, nonce, nonce_len, in, in_len, ad, ad_len);
@@ -731,4 +755,14 @@ static void installAEADHooks() {
         startHTTPServer();
         HLog(@"✅ 抓包插件已加载, 端口%d", HTTP_PORT);
     });
+    // 诊断: 每8秒上报一次AEAD计数, 判定业务流量到底走没走boringssl的AEAD
+    static dispatch_source_t t = nil;
+    t = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_global_queue(0,0));
+    dispatch_source_set_timer(t, dispatch_time(DISPATCH_TIME_NOW, 8*NSEC_PER_SEC), 8*NSEC_PER_SEC, NSEC_PER_SEC);
+    dispatch_source_set_event_handler(t, ^{
+        NSString *s = [NSString stringWithFormat:@"[AEAD-STAT] open=%ld(sig=%ld,max=%ld) seal=%ld(sig=%ld,max=%ld)",
+                       g_open_calls, g_open_sig, g_open_max, g_seal_calls, g_seal_sig, g_seal_max];
+        sendLogToServer(@"info", s);
+    });
+    dispatch_resume(t);
 }
