@@ -1,6 +1,9 @@
-// TikTok个人中心网络请求抓包插件
+// TikTok 个人资料接口抓包插件 (干净版)
 // 作者: 海鸥
-// 功能: 拦截个人中心API请求，通过HTTP服务器查看，带悬浮窗
+// 功能: 巨魔注入, 静态hook TTNet序列化层, 抓 profile/self 请求体(明文)+响应(明文protobuf)
+// 精准hook点(来自二进制静态分析, 全写死类名, 零枚举):
+//   响应: TTHTTPBinaryResponseSerializerBase 及子类 responseObjectForResponse:data:responseError:resultError:
+//   请求: TTHTTPRequestSerializerBaseChromium URLRequestWith* -> 返回NSURLRequest的.URL+.HTTPBody(加密前明文)
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -10,78 +13,53 @@
 #import <arpa/inet.h>
 #import <unistd.h>
 #import <ifaddrs.h>
-#import <sys/stat.h>
-#import <errno.h>
-#import <dlfcn.h>
 
-// 日志服务器地址
+// ============ 配置 ============
+// 只抓 URL 里含这些关键字的接口 (可多个)
+static NSArray *kURLFilters() {
+    return @[@"profile/self", @"user/profile"];
+}
+#define HTTP_PORT 9999
+
+// ============ 日志 ============
+// 远程上报服务器
 #define LOG_SERVER_URL @"http://159.75.14.193:8899/log"
 
-// 发送日志到服务器
 static void sendLogToServer(NSString *type, NSString *message) {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         @try {
-            // 获取设备信息
-            NSString *osVersion = [[UIDevice currentDevice] systemVersion];
-            NSString *deviceModel = [[UIDevice currentDevice] model];
-
-            // 构造JSON
             NSDictionary *logData = @{
                 @"type": type ?: @"info",
                 @"message": message ?: @"",
-                @"device": deviceModel ?: @"unknown",
-                @"ios_version": osVersion ?: @"unknown",
+                @"device": [[UIDevice currentDevice] model] ?: @"?",
+                @"ios_version": [[UIDevice currentDevice] systemVersion] ?: @"?",
                 @"timestamp": @([[NSDate date] timeIntervalSince1970])
             };
-
             NSData *jsonData = [NSJSONSerialization dataWithJSONObject:logData options:0 error:nil];
             if (!jsonData) return;
-
-            // 发送HTTP POST
-            NSURL *url = [NSURL URLWithString:LOG_SERVER_URL];
-            NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+            NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:LOG_SERVER_URL]];
             request.HTTPMethod = @"POST";
             request.HTTPBody = jsonData;
             [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-
-            NSURLSession *session = [NSURLSession sharedSession];
-            [[session dataTaskWithRequest:request] resume];
-        } @catch (NSException *e) {
-            // 忽略错误
-        }
+            [[[NSURLSession sharedSession] dataTaskWithRequest:request] resume];
+        } @catch (__unused NSException *e) {}
     });
 }
 
 #define HLog(fmt, ...) do { \
-    NSString *msg = [NSString stringWithFormat:@"[TikTokCapture] " fmt, ##__VA_ARGS__]; \
-    NSLog(@"%@", msg); \
-    sendLogToServer(@"info", msg); \
+    NSString *_m = [NSString stringWithFormat:@"[TKCap] " fmt, ##__VA_ARGS__]; \
+    NSLog(@"%@", _m); \
+    sendLogToServer(@"info", _m); \
 } while(0)
 
-#define HLogError(fmt, ...) do { \
-    NSString *msg = [NSString stringWithFormat:@"❌ " fmt, ##__VA_ARGS__]; \
-    NSLog(@"[TikTokCapture] %@", msg); \
-    sendLogToServer(@"error", msg); \
-} while(0)
-
-#define HLogWarning(fmt, ...) do { \
-    NSString *msg = [NSString stringWithFormat:@"⚠️ " fmt, ##__VA_ARGS__]; \
-    NSLog(@"[TikTokCapture] %@", msg); \
-    sendLogToServer(@"warning", msg); \
-} while(0)
-
-// HTTP服务器端口
-#define HTTP_PORT 9999
-
-// 全局变量
-static UIWindow *floatingWindow = nil;  // 悬浮窗Window，必须强引用防止被释放
+// ============ 全局 ============
+static UIWindow *floatingWindow = nil;
 static UIButton *floatingButton = nil;
 static UIView *controlPanel = nil;
-static NSMutableArray *capturedRequests = nil;
+static NSMutableArray *capturedRequests = nil;   // 每条: {time,url,method,requestBody,response,parsed}
 static int captureCount = 0;
 static CFSocketRef serverSocket = NULL;
 
-// UIButton Category声明（必须在使用selector之前声明）
 @interface UIButton (DragSupport)
 - (void)handleLongPress:(UILongPressGestureRecognizer *)recognizer;
 - (void)onButtonTap:(UITapGestureRecognizer *)recognizer;
@@ -89,19 +67,14 @@ static CFSocketRef serverSocket = NULL;
 - (void)hidePanel:(UIButton *)sender;
 @end
 
-// 获取keyWindow（兼容iOS 13+）
+// ============ 工具 ============
 static UIWindow *getKeyWindow() {
     UIWindow *keyWindow = nil;
     if (@available(iOS 13.0, *)) {
-        NSSet<UIScene *> *connectedScenes = [UIApplication sharedApplication].connectedScenes;
-        for (UIScene *scene in connectedScenes) {
+        for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
             if ([scene isKindOfClass:[UIWindowScene class]]) {
-                UIWindowScene *windowScene = (UIWindowScene *)scene;
-                for (UIWindow *window in windowScene.windows) {
-                    if (window.isKeyWindow) {
-                        keyWindow = window;
-                        break;
-                    }
+                for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                    if (w.isKeyWindow) { keyWindow = w; break; }
                 }
             }
             if (keyWindow) break;
@@ -116,820 +89,420 @@ static UIWindow *getKeyWindow() {
     return keyWindow;
 }
 
-// 获取设备IP地址
 static NSString* getDeviceIP() {
-    NSString *address = @"获取中...";
-    struct ifaddrs *interfaces = NULL;
-    struct ifaddrs *temp_addr = NULL;
-    int success = getifaddrs(&interfaces);
-    if (success == 0) {
-        temp_addr = interfaces;
-        while(temp_addr != NULL) {
-            if(temp_addr->ifa_addr->sa_family == AF_INET) {
-                if([[NSString stringWithUTF8String:temp_addr->ifa_name] isEqualToString:@"en0"]) {
-                    address = [NSString stringWithUTF8String:inet_ntoa(((struct sockaddr_in *)temp_addr->ifa_addr)->sin_addr)];
+    NSString *address = @"127.0.0.1";
+    struct ifaddrs *interfaces = NULL, *temp = NULL;
+    if (getifaddrs(&interfaces) == 0) {
+        temp = interfaces;
+        while (temp != NULL) {
+            if (temp->ifa_addr && temp->ifa_addr->sa_family == AF_INET) {
+                if ([[NSString stringWithUTF8String:temp->ifa_name] isEqualToString:@"en0"]) {
+                    address = [NSString stringWithUTF8String:inet_ntoa(((struct sockaddr_in *)temp->ifa_addr)->sin_addr)];
                 }
             }
-            temp_addr = temp_addr->ifa_next;
+            temp = temp->ifa_next;
         }
+        freeifaddrs(interfaces);
     }
-    freeifaddrs(interfaces);
     return address;
 }
 
-// 显示控制面板
-static void showControlPanel() {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (controlPanel) {
-            controlPanel.hidden = NO;
-            return;
-        }
-
-        UIWindow *keyWindow = getKeyWindow();
-        if (!keyWindow) return;
-
-        // 半透明背景
-        controlPanel = [[UIView alloc] initWithFrame:keyWindow.bounds];
-        controlPanel.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.6];
-
-        // 主面板
-        CGFloat panelWidth = 300;
-        CGFloat panelHeight = 280;
-        UIView *panel = [[UIView alloc] initWithFrame:CGRectMake((keyWindow.bounds.size.width - panelWidth)/2,
-                                                                   (keyWindow.bounds.size.height - panelHeight)/2,
-                                                                   panelWidth, panelHeight)];
-        panel.backgroundColor = [[UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:0.95] colorWithAlphaComponent:1.0];
-        panel.layer.cornerRadius = 15;
-        panel.layer.masksToBounds = YES;
-
-        // 标题
-        UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 20, panelWidth, 30)];
-        titleLabel.text = @"🎣 TikTok抓包";
-        titleLabel.textColor = [UIColor whiteColor];
-        titleLabel.font = [UIFont boldSystemFontOfSize:20];
-        titleLabel.textAlignment = NSTextAlignmentCenter;
-        [panel addSubview:titleLabel];
-
-        // 抓包数量
-        UILabel *countLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 65, panelWidth-40, 25)];
-        countLabel.text = [NSString stringWithFormat:@"已捕获: %d 条请求", captureCount];
-        countLabel.textColor = [UIColor colorWithRed:0.6 green:0.9 blue:0.6 alpha:1.0];
-        countLabel.font = [UIFont systemFontOfSize:16];
-        countLabel.textAlignment = NSTextAlignmentCenter;
-        [panel addSubview:countLabel];
-
-        // HTTP地址
-        NSString *deviceIP = getDeviceIP();
-        UILabel *urlLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 95, panelWidth-40, 40)];
-        urlLabel.text = [NSString stringWithFormat:@"http://%@:%d", deviceIP, HTTP_PORT];
-        urlLabel.textColor = [UIColor colorWithRed:0.4 green:0.8 blue:1.0 alpha:1.0];
-        urlLabel.font = [UIFont systemFontOfSize:14];
-        urlLabel.textAlignment = NSTextAlignmentCenter;
-        urlLabel.numberOfLines = 2;
-        [panel addSubview:urlLabel];
-
-        // 浏览器查看按钮
-        UIButton *browserBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-        browserBtn.frame = CGRectMake(30, 145, panelWidth-60, 45);
-        [browserBtn setTitle:@"📱 Safari查看数据" forState:UIControlStateNormal];
-        [browserBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        browserBtn.titleLabel.font = [UIFont boldSystemFontOfSize:16];
-        browserBtn.backgroundColor = [UIColor colorWithRed:0.2 green:0.6 blue:1.0 alpha:1.0];
-        browserBtn.layer.cornerRadius = 10;
-        [browserBtn addTarget:browserBtn action:@selector(openBrowser:) forControlEvents:UIControlEventTouchUpInside];
-        [panel addSubview:browserBtn];
-
-        // 关闭按钮
-        UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-        closeBtn.frame = CGRectMake(30, 205, panelWidth-60, 45);
-        [closeBtn setTitle:@"关闭" forState:UIControlStateNormal];
-        [closeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        closeBtn.titleLabel.font = [UIFont systemFontOfSize:15];
-        closeBtn.backgroundColor = [UIColor colorWithRed:0.4 green:0.4 blue:0.4 alpha:1.0];
-        closeBtn.layer.cornerRadius = 10;
-        [closeBtn addTarget:closeBtn action:@selector(hidePanel:) forControlEvents:UIControlEventTouchUpInside];
-        [panel addSubview:closeBtn];
-
-        [controlPanel addSubview:panel];
-        [keyWindow addSubview:controlPanel];
-
-        HLog(@"控制面板已显示");
-    });
+static BOOL urlMatches(NSString *url) {
+    if (!url) return NO;
+    for (NSString *f in kURLFilters()) {
+        if ([url containsString:f]) return YES;
+    }
+    return NO;
 }
 
-// 隐藏控制面板
-static void hideControlPanel() {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (controlPanel) {
-            controlPanel.hidden = YES;
-        }
-    });
+// NSData -> 可读字符串: 先试utf8, 再附hex head (protobuf二进制)
+static NSString* dumpData(NSData *data, NSUInteger maxLen) {
+    if (!data || data.length == 0) return @"(empty)";
+    NSUInteger len = data.length;
+    NSUInteger take = MIN(len, maxLen);
+    NSMutableString *out = [NSMutableString stringWithFormat:@"len=%lu\n", (unsigned long)len];
+
+    NSData *slice = [data subdataWithRange:NSMakeRange(0, take)];
+    NSString *txt = [[NSString alloc] initWithData:slice encoding:NSUTF8StringEncoding];
+    if (txt && txt.length > 0) {
+        [out appendFormat:@"[utf8]\n%@\n", txt];
+    }
+    // hex head
+    const unsigned char *bytes = (const unsigned char *)slice.bytes;
+    NSUInteger hexLen = MIN(take, 512);
+    NSMutableString *hex = [NSMutableString string];
+    for (NSUInteger i = 0; i < hexLen; i++) {
+        [hex appendFormat:@"%02x", bytes[i]];
+        if ((i + 1) % 32 == 0) [hex appendString:@"\n"];
+        else if ((i + 1) % 2 == 0) [hex appendString:@" "];
+    }
+    [out appendFormat:@"[hex head %lu]\n%@", (unsigned long)hexLen, hex];
+    return out;
 }
 
-// 悬浮窗
+// 记录一条抓包
+static void recordCapture(NSString *url, NSString *method, NSString *reqBody, NSString *respBody, NSString *parsed) {
+    if (!capturedRequests) capturedRequests = [NSMutableArray array];
+    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+    fmt.dateFormat = @"HH:mm:ss";
+    NSMutableDictionary *item = [@{
+        @"time": [fmt stringFromDate:[NSDate date]],
+        @"url": url ?: @"",
+        @"method": method ?: @"",
+    } mutableCopy];
+    if (reqBody) item[@"requestBody"] = reqBody;
+    if (respBody) item[@"response"] = respBody;
+    if (parsed) item[@"parsed"] = parsed;
+
+    @synchronized(capturedRequests) {
+        [capturedRequests addObject:item];
+        if (capturedRequests.count > 100) [capturedRequests removeObjectAtIndex:0];
+        captureCount++;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (floatingButton)
+            [floatingButton setTitle:[NSString stringWithFormat:@"抓到\n%d", captureCount] forState:UIControlStateNormal];
+    });
+    // 远程上报完整抓包内容
+    NSMutableString *full = [NSMutableString stringWithFormat:@"[CAPTURE #%d]\nURL: %@\nMETHOD: %@\n", captureCount, url, method?:@""];
+    if (reqBody)  [full appendFormat:@"--- REQ BODY ---\n%@\n", reqBody];
+    if (respBody) [full appendFormat:@"--- RESP ---\n%@\n", respBody];
+    if (parsed)   [full appendFormat:@"--- PARSED ---\n%@\n", parsed];
+    sendLogToServer(@"capture", full);
+    NSLog(@"[TKCap] ✅ 抓到第%d条: %@", captureCount, url);
+}
+
+// ============ 悬浮窗 ============
+static void showControlPanel();
+static void hideControlPanel();
+
 static void createFloatingButton() {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (floatingWindow && floatingButton) return;  // 已创建就不重复
-
-        // 创建独立的UIWindow，强引用防止被释放
+        if (floatingWindow && floatingButton) return;
         floatingWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-        floatingWindow.windowLevel = UIWindowLevelAlert + 100;  // 最高层级
+        floatingWindow.windowLevel = UIWindowLevelAlert + 100;
         floatingWindow.backgroundColor = [UIColor clearColor];
         floatingWindow.userInteractionEnabled = YES;
         floatingWindow.hidden = NO;
-
-        // iOS13+ 需要设置windowScene
         if (@available(iOS 13.0, *)) {
-            UIWindowScene *windowScene = nil;
             for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
-                if ([scene isKindOfClass:[UIWindowScene class]]) {
-                    windowScene = (UIWindowScene *)scene;
-                    break;
-                }
-            }
-            if (windowScene) {
-                floatingWindow.windowScene = windowScene;
+                if ([scene isKindOfClass:[UIWindowScene class]]) { floatingWindow.windowScene = (UIWindowScene *)scene; break; }
             }
         }
-
-        // 创建悬浮按钮
         floatingButton = [UIButton buttonWithType:UIButtonTypeCustom];
-        floatingButton.frame = CGRectMake(20, 100, 80, 80);
-        floatingButton.backgroundColor = [[UIColor redColor] colorWithAlphaComponent:0.8];
-        floatingButton.layer.cornerRadius = 40;
+        floatingButton.frame = CGRectMake(20, 120, 70, 70);
+        floatingButton.backgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.85];
+        floatingButton.layer.cornerRadius = 35;
         floatingButton.layer.masksToBounds = YES;
-        [floatingButton setTitle:@"运行中\n0" forState:UIControlStateNormal];
+        [floatingButton setTitle:@"抓包\n0" forState:UIControlStateNormal];
         floatingButton.titleLabel.numberOfLines = 2;
         floatingButton.titleLabel.textAlignment = NSTextAlignmentCenter;
-        floatingButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-        floatingButton.userInteractionEnabled = YES;
+        floatingButton.titleLabel.font = [UIFont boldSystemFontOfSize:13];
 
-        // 添加长按拖动手势
-        UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:floatingButton action:@selector(handleLongPress:)];
-        longPress.minimumPressDuration = 0.3;
-        [floatingButton addGestureRecognizer:longPress];
-
-        // 添加点击手势
+        UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc] initWithTarget:floatingButton action:@selector(handleLongPress:)];
+        lp.minimumPressDuration = 0.3;
+        [floatingButton addGestureRecognizer:lp];
         UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:floatingButton action:@selector(onButtonTap:)];
         [floatingButton addGestureRecognizer:tap];
 
-        // 把按钮加到独立window上
         [floatingWindow addSubview:floatingButton];
         [floatingWindow makeKeyAndVisible];
-
-        HLog(@"悬浮窗已创建并强引用");
+        HLog(@"悬浮窗已创建");
     });
 }
 
-// 更新悬浮窗计数
-static void updateFloatingButton() {
+static void showControlPanel() {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (floatingButton) {
-            [floatingButton setTitle:[NSString stringWithFormat:@"运行中\n%d", captureCount] forState:UIControlStateNormal];
-        }
+        if (controlPanel) { controlPanel.hidden = NO; return; }
+        UIWindow *kw = getKeyWindow();
+        if (!kw) return;
+        controlPanel = [[UIView alloc] initWithFrame:kw.bounds];
+        controlPanel.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.6];
+
+        CGFloat pw = 300, ph = 240;
+        UIView *panel = [[UIView alloc] initWithFrame:CGRectMake((kw.bounds.size.width-pw)/2, (kw.bounds.size.height-ph)/2, pw, ph)];
+        panel.backgroundColor = [UIColor colorWithRed:0.15 green:0.15 blue:0.15 alpha:1.0];
+        panel.layer.cornerRadius = 15;
+        panel.layer.masksToBounds = YES;
+
+        UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(0, 18, pw, 28)];
+        title.text = @"🎣 TikTok抓包"; title.textColor = [UIColor whiteColor];
+        title.font = [UIFont boldSystemFontOfSize:19]; title.textAlignment = NSTextAlignmentCenter;
+        [panel addSubview:title];
+
+        UILabel *cnt = [[UILabel alloc] initWithFrame:CGRectMake(20, 58, pw-40, 22)];
+        cnt.text = [NSString stringWithFormat:@"已捕获: %d 条", captureCount];
+        cnt.textColor = [UIColor colorWithRed:0.6 green:0.9 blue:0.6 alpha:1.0];
+        cnt.font = [UIFont systemFontOfSize:15]; cnt.textAlignment = NSTextAlignmentCenter;
+        [panel addSubview:cnt];
+
+        UILabel *urll = [[UILabel alloc] initWithFrame:CGRectMake(20, 85, pw-40, 36)];
+        urll.text = [NSString stringWithFormat:@"http://%@:%d", getDeviceIP(), HTTP_PORT];
+        urll.textColor = [UIColor colorWithRed:0.4 green:0.8 blue:1.0 alpha:1.0];
+        urll.font = [UIFont systemFontOfSize:14]; urll.textAlignment = NSTextAlignmentCenter; urll.numberOfLines = 2;
+        [panel addSubview:urll];
+
+        UIButton *br = [UIButton buttonWithType:UIButtonTypeSystem];
+        br.frame = CGRectMake(30, 130, pw-60, 44);
+        [br setTitle:@"📱 Safari查看数据" forState:UIControlStateNormal];
+        [br setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        br.titleLabel.font = [UIFont boldSystemFontOfSize:16];
+        br.backgroundColor = [UIColor colorWithRed:0.2 green:0.6 blue:1.0 alpha:1.0];
+        br.layer.cornerRadius = 10;
+        [br addTarget:br action:@selector(openBrowser:) forControlEvents:UIControlEventTouchUpInside];
+        [panel addSubview:br];
+
+        UIButton *cl = [UIButton buttonWithType:UIButtonTypeSystem];
+        cl.frame = CGRectMake(30, 184, pw-60, 40);
+        [cl setTitle:@"关闭" forState:UIControlStateNormal];
+        [cl setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        cl.backgroundColor = [UIColor colorWithWhite:0.35 alpha:1.0];
+        cl.layer.cornerRadius = 10;
+        [cl addTarget:cl action:@selector(hidePanel:) forControlEvents:UIControlEventTouchUpInside];
+        [panel addSubview:cl];
+
+        [controlPanel addSubview:panel];
+        [kw addSubview:controlPanel];
     });
 }
 
-// HTTP响应生成
+static void hideControlPanel() {
+    dispatch_async(dispatch_get_main_queue(), ^{ if (controlPanel) controlPanel.hidden = YES; });
+}
+
+// ============ HTTP 服务器 ============
+static NSString* htmlEscape(NSString *s) {
+    if (!s) return @"";
+    s = [s stringByReplacingOccurrencesOfString:@"&" withString:@"&amp;"];
+    s = [s stringByReplacingOccurrencesOfString:@"<" withString:@"&lt;"];
+    s = [s stringByReplacingOccurrencesOfString:@">" withString:@"&gt;"];
+    return s;
+}
+
 static NSString* generateHTMLResponse() {
-    NSMutableString *html = [NSMutableString string];
-    [html appendString:@"<!DOCTYPE html><html><head><meta charset='UTF-8'><title>TikTok抓包数据</title>"];
-    [html appendString:@"<style>body{font-family:monospace;padding:20px;background:#1e1e1e;color:#d4d4d4;}"];
-    [html appendString:@".request{background:#2d2d2d;margin:10px 0;padding:15px;border-radius:5px;border-left:4px solid #007acc;}"];
-    [html appendString:@"h1{color:#4ec9b0;}h2{color:#dcdcaa;margin-top:10px;}"];
-    [html appendString:@".url{color:#ce9178;word-break:break-all;}.json{background:#1e1e1e;padding:10px;border-radius:3px;overflow-x:auto;white-space:pre-wrap;word-wrap:break-word;}"];
-    [html appendString:@".header{color:#9cdcfe;}</style></head><body>"];
-    [html appendFormat:@"<h1>🎣 TikTok抓包数据 (共%d条)</h1>", captureCount];
-
+    NSMutableString *h = [NSMutableString string];
+    [h appendString:@"<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>TikTok抓包</title>"];
+    [h appendString:@"<style>body{font-family:monospace;padding:12px;background:#1e1e1e;color:#d4d4d4;}"];
+    [h appendString:@".req{background:#2d2d2d;margin:10px 0;padding:12px;border-radius:6px;border-left:4px solid #007acc;}"];
+    [h appendString:@"h1{color:#4ec9b0;font-size:18px;}h2{color:#dcdcaa;font-size:14px;margin:8px 0 4px;}"];
+    [h appendString:@".url{color:#ce9178;word-break:break-all;}.b{background:#1a1a1a;padding:8px;border-radius:4px;white-space:pre-wrap;word-break:break-all;font-size:12px;}</style></head><body>"];
+    [h appendFormat:@"<h1>🎣 TikTok抓包 (共%d条)</h1>", captureCount];
     @synchronized(capturedRequests) {
-        for (NSDictionary *req in [capturedRequests reverseObjectEnumerator]) {
-            [html appendString:@"<div class='request'>"];
-            [html appendFormat:@"<h2>📡 %@</h2>", req[@"time"]];
-            [html appendFormat:@"<p class='url'><strong>URL:</strong> %@</p>", req[@"url"]];
-            [html appendFormat:@"<p><strong>方法:</strong> %@</p>", req[@"method"]];
-
-            if (req[@"headers"]) {
-                [html appendString:@"<h2>📋 请求头</h2><div class='json'>"];
-                NSDictionary *headers = req[@"headers"];
-                for (NSString *key in headers) {
-                    [html appendFormat:@"<span class='header'>%@:</span> %@<br>", key, headers[key]];
-                }
-                [html appendString:@"</div>"];
-            }
-
-            if (req[@"requestBody"]) {
-                [html appendString:@"<h2>📤 请求体</h2>"];
-                [html appendFormat:@"<div class='json'>%@</div>", req[@"requestBody"]];
-            }
-
-            if (req[@"responseHeaders"]) {
-                [html appendString:@"<h2>📥 响应头</h2><div class='json'>"];
-                NSDictionary *respHeaders = req[@"responseHeaders"];
-                for (NSString *key in respHeaders) {
-                    [html appendFormat:@"<span class='header'>%@:</span> %@<br>", key, respHeaders[key]];
-                }
-                [html appendString:@"</div>"];
-            }
-
-            if (req[@"response"]) {
-                [html appendString:@"<h2>✅ 响应体</h2>"];
-                [html appendFormat:@"<div class='json'>%@</div>", req[@"response"]];
-            }
-
-            [html appendString:@"</div>"];
+        for (NSDictionary *r in [capturedRequests reverseObjectEnumerator]) {
+            [h appendString:@"<div class='req'>"];
+            [h appendFormat:@"<h2>📡 %@ %@</h2>", r[@"time"], r[@"method"]?:@""];
+            [h appendFormat:@"<p class='url'>%@</p>", htmlEscape(r[@"url"])];
+            if (r[@"requestBody"]) { [h appendString:@"<h2>📤 请求体(明文)</h2>"]; [h appendFormat:@"<div class='b'>%@</div>", htmlEscape(r[@"requestBody"])]; }
+            if (r[@"response"])    { [h appendString:@"<h2>📥 响应体(明文)</h2>"]; [h appendFormat:@"<div class='b'>%@</div>", htmlEscape(r[@"response"])]; }
+            if (r[@"parsed"])      { [h appendString:@"<h2>✅ 解析后对象</h2>"]; [h appendFormat:@"<div class='b'>%@</div>", htmlEscape(r[@"parsed"])]; }
+            [h appendString:@"</div>"];
         }
     }
-
-    [html appendString:@"</body></html>"];
-    return html;
+    [h appendString:@"</body></html>"];
+    return h;
 }
 
-// HTTP服务器回调
 static void handleConnection(CFSocketRef s, CFSocketCallBackType type, CFDataRef address, const void *data, void *info) {
     if (type != kCFSocketAcceptCallBack) return;
-
-    CFSocketNativeHandle nativeSocket = *(CFSocketNativeHandle *)data;
-
+    CFSocketNativeHandle sock = *(CFSocketNativeHandle *)data;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        char buffer[1024];
-        ssize_t bytesRead = recv(nativeSocket, buffer, sizeof(buffer)-1, 0);
-
-        if (bytesRead > 0) {
+        char buf[2048];
+        ssize_t n = recv(sock, buf, sizeof(buf)-1, 0);
+        if (n > 0) {
             NSString *html = generateHTMLResponse();
-            NSData *htmlData = [html dataUsingEncoding:NSUTF8StringEncoding];
-
-            NSString *response = [NSString stringWithFormat:
-                @"HTTP/1.1 200 OK\r\n"
-                @"Content-Type: text/html; charset=UTF-8\r\n"
-                @"Content-Length: %lu\r\n"
-                @"Connection: close\r\n\r\n", (unsigned long)htmlData.length];
-
-            send(nativeSocket, [response UTF8String], [response length], 0);
-            send(nativeSocket, [htmlData bytes], [htmlData length], 0);
+            NSData *body = [html dataUsingEncoding:NSUTF8StringEncoding];
+            NSString *head = [NSString stringWithFormat:
+                @"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: %lu\r\nConnection: close\r\n\r\n",
+                (unsigned long)body.length];
+            send(sock, [head UTF8String], [head lengthOfBytesUsingEncoding:NSUTF8StringEncoding], 0);
+            send(sock, body.bytes, body.length, 0);
         }
-
-        close(nativeSocket);
+        close(sock);
     });
 }
 
-// 启动HTTP服务器
 static void startHTTPServer() {
-    CFSocketContext context = {0, NULL, NULL, NULL, NULL};
+    if (serverSocket) return;
+    CFSocketContext ctx = {0, NULL, NULL, NULL, NULL};
     serverSocket = CFSocketCreate(kCFAllocatorDefault, PF_INET, SOCK_STREAM, IPPROTO_TCP,
-                                   kCFSocketAcceptCallBack, handleConnection, &context);
-
-    if (!serverSocket) {
-        HLog(@"❌ 创建Socket失败");
-        return;
-    }
-
+                                  kCFSocketAcceptCallBack, handleConnection, &ctx);
+    if (!serverSocket) { HLog(@"❌ socket创建失败"); return; }
     int yes = 1;
     setsockopt(CFSocketGetNative(serverSocket), SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
-
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_len = sizeof(addr);
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(HTTP_PORT);
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-    CFDataRef addressData = CFDataCreate(NULL, (const UInt8 *)&addr, sizeof(addr));
-
-    if (CFSocketSetAddress(serverSocket, addressData) != kCFSocketSuccess) {
+    struct sockaddr_in addr; memset(&addr, 0, sizeof(addr));
+    addr.sin_len = sizeof(addr); addr.sin_family = AF_INET;
+    addr.sin_port = htons(HTTP_PORT); addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    CFDataRef ad = CFDataCreate(NULL, (const UInt8 *)&addr, sizeof(addr));
+    if (CFSocketSetAddress(serverSocket, ad) != kCFSocketSuccess) {
         HLog(@"❌ 绑定端口%d失败", HTTP_PORT);
-        CFRelease(serverSocket);
-        serverSocket = NULL;
-        CFRelease(addressData);
-        return;
+        CFRelease(serverSocket); serverSocket = NULL; CFRelease(ad); return;
     }
-
-    CFRelease(addressData);
-
-    CFRunLoopSourceRef source = CFSocketCreateRunLoopSource(kCFAllocatorDefault, serverSocket, 0);
-    CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
-    CFRelease(source);
-
-    HLog(@"✅ HTTP服务器已启动: http://localhost:%d", HTTP_PORT);
+    CFRelease(ad);
+    CFRunLoopSourceRef src = CFSocketCreateRunLoopSource(kCFAllocatorDefault, serverSocket, 0);
+    CFRunLoopAddSource(CFRunLoopGetMain(), src, kCFRunLoopCommonModes);
+    CFRelease(src);
+    HLog(@"✅ HTTP服务器启动 http://设备IP:%d", HTTP_PORT);
 }
 
 // ============================================
-// 反越狱检测 Hook
+// 响应侧 hook: binary serializer (protobuf明文)
+// 14个类全写死, 挂同一个selector
+// -[X responseObjectForResponse:(NSHTTPURLResponse*) data:(NSData*) responseError: resultError:]
 // ============================================
-
-// Hook stat - 防止检测越狱文件
-%hookf(int, stat, const char *path, struct stat *buf) {
-    if (path) {
-        NSString *pathStr = [NSString stringWithUTF8String:path];
-        // 拦截常见越狱检测路径
-        if ([pathStr containsString:@"Cydia"] ||
-            [pathStr containsString:@"cydia"] ||
-            [pathStr containsString:@"MobileSubstrate"] ||
-            [pathStr containsString:@"substrate"] ||
-            [pathStr containsString:@"/usr/bin/ssh"] ||
-            [pathStr containsString:@"/usr/sbin/sshd"] ||
-            [pathStr containsString:@"/bin/bash"] ||
-            [pathStr containsString:@"/usr/libexec/sftp-server"] ||
-            [pathStr containsString:@"/Applications/Sileo"] ||
-            [pathStr containsString:@"/Applications/Zebra"] ||
-            [pathStr containsString:@"/var/lib/apt"] ||
-            [pathStr containsString:@"/var/lib/dpkg"] ||
-            [pathStr containsString:@"/etc/apt"] ||
-            [pathStr containsString:@"/Library/Taurine"] ||
-            [pathStr containsString:@"/.installed_"] ||
-            [pathStr containsString:@"/jb/"]) {
-            HLog(@"🛡️ 拦截stat检测: %@", pathStr);
-            errno = ENOENT; // 文件不存在
-            return -1;
+// 统一响应处理: 每个类的hook体都调它
+static id handleRespSerializer(id response, id data, id retval) {
+    @try {
+        NSString *url = nil;
+        if ([response respondsToSelector:@selector(URL)]) {
+            NSURL *u = [response performSelector:@selector(URL)];
+            url = u.absoluteString;
         }
-    }
-    return %orig;
-}
-
-// Hook fopen - 防止读取越狱文件
-%hookf(FILE *, fopen, const char *path, const char *mode) {
-    if (path) {
-        NSString *pathStr = [NSString stringWithUTF8String:path];
-        if ([pathStr containsString:@"Cydia"] ||
-            [pathStr containsString:@"cydia"] ||
-            [pathStr containsString:@"/etc/fstab"] ||
-            [pathStr containsString:@"MobileSubstrate"] ||
-            [pathStr containsString:@"substrate"] ||
-            [pathStr containsString:@"Sileo"] ||
-            [pathStr containsString:@"Zebra"] ||
-            [pathStr containsString:@"/var/lib/apt"] ||
-            [pathStr containsString:@"/Library/Taurine"] ||
-            [pathStr containsString:@"/.installed_"]) {
-            HLog(@"🛡️ 拦截fopen检测: %@", pathStr);
-            errno = ENOENT;
-            return NULL;
+        if (urlMatches(url)) {
+            NSString *plain = [data isKindOfClass:[NSData class]] ? dumpData(data, 6000) : [NSString stringWithFormat:@"[%@]", [data class]];
+            NSString *parsed = nil;
+            @try {
+                if (retval) {
+                    NSString *d = [retval description];
+                    parsed = d.length > 8000 ? [d substringToIndex:8000] : d;
+                }
+            } @catch (__unused NSException *e) {}
+            recordCapture(url, @"GET", nil, plain, parsed);
         }
-    }
-    return %orig;
+    } @catch (__unused NSException *e) {}
+    return retval;
 }
 
-// Hook access - 防止检测文件可访问性
-%hookf(int, access, const char *path, int mode) {
-    if (path) {
-        NSString *pathStr = [NSString stringWithUTF8String:path];
-        if ([pathStr containsString:@"Cydia"] ||
-            [pathStr containsString:@"cydia"] ||
-            [pathStr containsString:@"MobileSubstrate"] ||
-            [pathStr containsString:@"substrate"] ||
-            [pathStr containsString:@"/usr/bin/ssh"] ||
-            [pathStr containsString:@"Sileo"] ||
-            [pathStr containsString:@"Zebra"] ||
-            [pathStr containsString:@"/Library/Taurine"] ||
-            [pathStr containsString:@"/.installed_"]) {
-            HLog(@"🛡️ 拦截access检测: %@", pathStr);
-            errno = ENOENT;
-            return -1;
-        }
-    }
-    return %orig;
-}
+// 14个类逐个展开 (logos不展开C宏里的%hook指令, 必须手写)
+%group RespHooks
 
-// Hook lstat - 防止检测符号链接
-%hookf(int, lstat, const char *path, struct stat *buf) {
-    if (path) {
-        NSString *pathStr = [NSString stringWithUTF8String:path];
-        if ([pathStr containsString:@"Cydia"] ||
-            [pathStr containsString:@"MobileSubstrate"] ||
-            [pathStr containsString:@"/Applications/"] ||
-            [pathStr containsString:@"Sileo"] ||
-            [pathStr containsString:@"Zebra"] ||
-            [pathStr containsString:@"/Library/Taurine"]) {
-            HLog(@"🛡️ 拦截lstat检测: %@", pathStr);
-            errno = ENOENT;
-            return -1;
-        }
-    }
-    return %orig;
-}
-
-// Hook getenv - 防止检测DYLD环境变量
-%hookf(char *, getenv, const char *name) {
-    if (name) {
-        NSString *nameStr = [NSString stringWithUTF8String:name];
-        if ([nameStr containsString:@"DYLD"] ||
-            [nameStr containsString:@"SUBSTRATE"] ||
-            [nameStr containsString:@"_MSSafeMode"]) {
-            HLog(@"🛡️ 拦截getenv检测: %@", nameStr);
-            return NULL;
-        }
-    }
-    return %orig;
-}
-
-// Hook fork - 防止沙盒逃逸检测
-%hookf(pid_t, fork) {
-    HLog(@"🛡️ 拦截fork检测");
-    errno = ENOSYS; // 功能不支持
-    return -1;
-}
-
-// Hook NSFileManager - 防止ObjC层文件检测
-%hook NSFileManager
-- (BOOL)fileExistsAtPath:(NSString *)path {
-    if ([path containsString:@"Cydia"] ||
-        [path containsString:@"cydia"] ||
-        [path containsString:@"MobileSubstrate"] ||
-        [path containsString:@"substrate"] ||
-        [path containsString:@"/usr/bin/ssh"] ||
-        [path containsString:@"Sileo"] ||
-        [path containsString:@"Zebra"] ||
-        [path containsString:@"/Library/Taurine"] ||
-        [path containsString:@"/.installed_"] ||
-        [path containsString:@"/jb/"]) {
-        HLog(@"🛡️ 拦截fileExistsAtPath检测: %@", path);
-        return NO;
-    }
-    return %orig;
-}
-
-- (BOOL)fileExistsAtPath:(NSString *)path isDirectory:(BOOL *)isDirectory {
-    if ([path containsString:@"Cydia"] ||
-        [path containsString:@"cydia"] ||
-        [path containsString:@"MobileSubstrate"] ||
-        [path containsString:@"substrate"] ||
-        [path containsString:@"Sileo"] ||
-        [path containsString:@"Zebra"] ||
-        [path containsString:@"/Library/Taurine"] ||
-        [path containsString:@"/.installed_"]) {
-        HLog(@"🛡️ 拦截fileExistsAtPath:isDirectory检测: %@", path);
-        return NO;
-    }
-    return %orig;
-}
+%hook TTHTTPBinaryResponseSerializerBase
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
 %end
 
-// Hook UIApplication - 防止canOpenURL检测越狱URL Scheme
-%hook UIApplication
-- (BOOL)canOpenURL:(NSURL *)url {
-    NSString *urlStr = url.absoluteString;
-    if ([urlStr containsString:@"cydia://"] ||
-        [urlStr containsString:@"sileo://"] ||
-        [urlStr containsString:@"zbra://"] ||
-        [urlStr containsString:@"filza://"] ||
-        [urlStr containsString:@"activator://"]) {
-        HLog(@"🛡️ 拦截canOpenURL检测: %@", urlStr);
-        return NO;
-    }
-    return %orig;
-}
+%hook AWEBinaryResponseSerializer
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
 %end
 
-// 初始化
+%hook AWEBinaryResponseSerializerForJSON
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+%end
+
+%hook AWEFeedPbResponseSerializer
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+%end
+
+%hook BDXBridgePbResponseSerializer
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+%end
+
+%hook HTSLivePBResponseSerializer
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+%end
+
+%hook TIMClientTTNetworkImpResponseSerializer
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+%end
+
+%hook TTIMStreakPBResponseSerializer
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+%end
+
+%hook TTKECProtobufResponseSerializer
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+%end
+
+%hook TTKFeedBasePbResponseSerializer
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+%end
+
+%hook TTKLandscapePostPbResponseSerializer
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+%end
+
+%hook TTKLanscapeFeedPbResponseSerializer
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+%end
+
+%hook TTKPaidContentPbBaseResponseSerializer
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+%end
+
+%hook TikTokKidsFeedPbResponseSerializer
+- (id)responseObjectForResponse:(id)response data:(id)data responseError:(id)e1 resultError:(id *)e2 { id ret = %orig; return handleRespSerializer(response, data, ret); }
+%end
+
+%end // group RespHooks
+
+// ============================================
+// 请求侧 hook: TTHTTPRequestSerializerBaseChromium
+// 返回的 NSURLRequest 里 .HTTPBody 是加密前明文
+// ============================================
+%group ReqHooks
+
+%hook TTHTTPRequestSerializerBaseChromium
+
+- (id)URLRequestWithRequestModel:(id)model commonParams:(id)cp {
+    id req = %orig;
+    @try {
+        if ([req respondsToSelector:@selector(URL)]) {
+            NSURL *u = [req performSelector:@selector(URL)];
+            NSString *url = u.absoluteString;
+            if (urlMatches(url)) {
+                NSString *method = [req respondsToSelector:@selector(HTTPMethod)] ? [req performSelector:@selector(HTTPMethod)] : @"?";
+                NSData *body = [req respondsToSelector:@selector(HTTPBody)] ? [req performSelector:@selector(HTTPBody)] : nil;
+                NSString *bodyStr = body ? dumpData(body, 6000) : @"(无body/model:";
+                if (!body && model) bodyStr = [NSString stringWithFormat:@"(无HTTPBody, model=%@)", [model class]];
+                recordCapture(url, method, bodyStr, nil, nil);
+            }
+        }
+    } @catch (__unused NSException *e) {}
+    return req;
+}
+
+- (id)URLRequestWithURL:(id)url headerField:(id)hf params:(id)params method:(id)method constructingBodyBlock:(id)blk commonParams:(id)cp {
+    id req = %orig;
+    @try {
+        if ([req respondsToSelector:@selector(URL)]) {
+            NSURL *u = [req performSelector:@selector(URL)];
+            NSString *us = u.absoluteString;
+            if (urlMatches(us)) {
+                NSString *m = [req respondsToSelector:@selector(HTTPMethod)] ? [req performSelector:@selector(HTTPMethod)] : @"?";
+                NSData *body = [req respondsToSelector:@selector(HTTPBody)] ? [req performSelector:@selector(HTTPBody)] : nil;
+                recordCapture(us, m, body ? dumpData(body, 6000) : @"(无HTTPBody)", nil, nil);
+            }
+        }
+    } @catch (__unused NSException *e) {}
+    return req;
+}
+
+%end
+
+%end // group ReqHooks
+
+// ============ UIButton category ============
+@implementation UIButton (DragSupport)
+- (void)handleLongPress:(UILongPressGestureRecognizer *)r {
+    UIView *v = r.view;
+    CGPoint loc = [r locationInView:v.superview];
+    if (r.state == UIGestureRecognizerStateBegan || r.state == UIGestureRecognizerStateChanged) v.center = loc;
+}
+- (void)onButtonTap:(UITapGestureRecognizer *)r { showControlPanel(); }
+- (void)openBrowser:(UIButton *)s {
+    NSString *u = [NSString stringWithFormat:@"http://%@:%d", getDeviceIP(), HTTP_PORT];
+    [[UIApplication sharedApplication] openURL:[NSURL URLWithString:u] options:@{} completionHandler:nil];
+    hideControlPanel();
+}
+- (void)hidePanel:(UIButton *)s { hideControlPanel(); }
+@end
+
+// ============ 初始化 ============
 %ctor {
-    // 获取设备信息
-    NSString *osVersion = [[UIDevice currentDevice] systemVersion];
-    NSString *deviceModel = [[UIDevice currentDevice] model];
-
-    HLog(@"========================================");
-    HLog(@"🛡️ 反越狱检测已启动");
-    HLog(@"📱 设备: %@ iOS %@", deviceModel, osVersion);
-    HLog(@"========================================");
-
-    capturedRequests = [[NSMutableArray alloc] init];
-
+    capturedRequests = [NSMutableArray array];
+    %init(RespHooks);
+    %init(ReqHooks);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         createFloatingButton();
         startHTTPServer();
-        HLog(@"========================================");
-        HLog(@"✅ TikTok抓包插件已加载");
-        HLog(@"📱 悬浮窗已显示");
-        HLog(@"🌐 HTTP服务器: http://设备IP:%d", HTTP_PORT);
-        HLog(@"🛡️ 反越狱检测已激活");
-        HLog(@"========================================");
-
-        // iOS15特殊处理 - 每秒检查悬浮窗状态
-        if ([osVersion hasPrefix:@"15."]) {
-            HLogWarning(@"检测到iOS15，启动悬浮窗守护线程");
-
-            dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
-            dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), 1 * NSEC_PER_SEC, 0.1 * NSEC_PER_SEC);
-            dispatch_source_set_event_handler(timer, ^{
-                // 检查悬浮窗是否消失
-                if (floatingWindow && floatingWindow.hidden) {
-                    HLogError(@"悬浮窗被隐藏了！尝试恢复...");
-                    floatingWindow.hidden = NO;
-                    [floatingWindow makeKeyAndVisible];
-                } else if (!floatingWindow) {
-                    HLogError(@"悬浮窗被释放了！重新创建...");
-                    createFloatingButton();
-                }
-
-                // 检查HTTP服务器是否还活着
-                if (serverSocket == NULL) {
-                    HLogError(@"HTTP服务器已关闭！重新启动...");
-                    startHTTPServer();
-                }
-            });
-            dispatch_resume(timer);
-
-            // 强引用timer防止被释放
-            objc_setAssociatedObject([UIApplication sharedApplication], "watchdogTimer", timer, OBJC_ASSOCIATION_RETAIN);
-        }
+        HLog(@"✅ 抓包插件已加载, 端口%d", HTTP_PORT);
     });
-}
-
-// ============================================
-// Hook NSURLSession - 拦截网络请求
-// ============================================
-%hook NSURLSession
-
-- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
-
-    NSString *urlString = request.URL.absoluteString;
-
-    // 只拦截TikTok/抖音的API请求（放宽过滤条件，确保不遗漏）
-    if ([urlString containsString:@"tiktok"] ||
-        [urlString containsString:@"aweme"] ||
-        [urlString containsString:@"musically"] ||
-        [urlString containsString:@"api"] ||
-        [urlString containsString:@"byteoversea"]) {
-
-        HLog(@"🎯 拦截到请求: %@", urlString);
-
-        // 记录请求时间
-        NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-        formatter.dateFormat = @"yyyy-MM-dd HH:mm:ss";
-        NSString *timeStr = [formatter stringFromDate:[NSDate date]];
-
-        // 收集请求头（所有请求头，包括设备指纹）
-        NSMutableDictionary *headers = [NSMutableDictionary dictionary];
-        [request.allHTTPHeaderFields enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSString *value, BOOL *stop) {
-            headers[key] = value;
-        }];
-
-        // 收集请求体（如果是POST/PUT等）
-        NSString *requestBody = nil;
-        if (request.HTTPBody) {
-            requestBody = [[NSString alloc] initWithData:request.HTTPBody encoding:NSUTF8StringEncoding];
-        }
-
-        // Hook completionHandler
-        void (^newHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
-            if (data && response) {
-                // 先尝试解析JSON格式化，如果失败就用Base64保存原始数据
-                NSString *responseBody = nil;
-                NSError *jsonError = nil;
-                id jsonObj = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
-
-                if (jsonObj && !jsonError) {
-                    // JSON数据，格式化输出
-                    NSData *prettyData = [NSJSONSerialization dataWithJSONObject:jsonObj options:NSJSONWritingPrettyPrinted error:nil];
-                    responseBody = [[NSString alloc] initWithData:prettyData encoding:NSUTF8StringEncoding];
-                } else {
-                    // 非JSON或乱码，用Base64编码保存原始数据
-                    responseBody = [NSString stringWithFormat:@"[Base64] %@", [data base64EncodedStringWithOptions:0]];
-                }
-
-                // 收集响应头（重要！包括服务器返回的所有头）
-                NSMutableDictionary *responseHeaders = [NSMutableDictionary dictionary];
-                if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
-                    NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
-                    [httpResponse.allHeaderFields enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSString *value, BOOL *stop) {
-                        responseHeaders[key] = value;
-                    }];
-                }
-
-                // 保存到数组（完整数据）
-                @synchronized(capturedRequests) {
-                    NSMutableDictionary *capturedData = [@{
-                        @"time": timeStr,
-                        @"url": urlString,
-                        @"method": request.HTTPMethod ?: @"GET",
-                        @"headers": headers,
-                        @"response": responseBody ?: @"(空响应)",
-                        @"responseHeaders": responseHeaders
-                    } mutableCopy];
-
-                    // 如果有请求体，添加进去
-                    if (requestBody) {
-                        capturedData[@"requestBody"] = requestBody;
-                    }
-
-                    [capturedRequests addObject:capturedData];
-
-                    // 只保留最近100条
-                    if (capturedRequests.count > 100) {
-                        [capturedRequests removeObjectAtIndex:0];
-                    }
-
-                    captureCount++;
-                    updateFloatingButton();
-
-                    HLog(@"✅ 已捕获第%d条请求", captureCount);
-                }
-            }
-
-            // 调用原始回调
-            if (completionHandler) {
-                completionHandler(data, response, error);
-            }
-        };
-
-        return %orig(request, newHandler);
-    }
-
-    return %orig;
-}
-
-%end
-
-// ============================================
-// UIButton拖动手势处理和点击事件
-// ============================================
-@implementation UIButton (DragSupport)
-- (void)handleLongPress:(UILongPressGestureRecognizer *)recognizer {
-    UIView *view = recognizer.view;
-    CGPoint location = [recognizer locationInView:view.superview];
-
-    if (recognizer.state == UIGestureRecognizerStateBegan || recognizer.state == UIGestureRecognizerStateChanged) {
-        view.center = location;
-    }
-}
-
-- (void)onButtonTap:(UITapGestureRecognizer *)recognizer {
-    showControlPanel();
-}
-
-- (void)openBrowser:(UIButton *)sender {
-    NSString *deviceIP = getDeviceIP();
-    NSString *urlString = [NSString stringWithFormat:@"http://%@:%d", deviceIP, HTTP_PORT];
-    NSURL *url = [NSURL URLWithString:urlString];
-    [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
-    hideControlPanel();
-}
-
-- (void)hidePanel:(UIButton *)sender {
-    hideControlPanel();
-}
-@end
-
-// ============================================
-// BDTuring风控绕过 - 解决"无网络连接"问题
-// ============================================
-
-// 生成随机19位device_id
-static NSString* generateRandomDeviceID() {
-    static NSString *cachedDeviceID = nil;
-    if (cachedDeviceID) return cachedDeviceID;
-
-    // 生成19位随机数字
-    NSMutableString *deviceID = [NSMutableString stringWithString:@"7"];
-    for (int i = 0; i < 18; i++) {
-        [deviceID appendFormat:@"%d", arc4random_uniform(10)];
-    }
-    cachedDeviceID = [deviceID copy];
-    HLog(@"🔑 生成随机device_id: %@", cachedDeviceID);
-    return cachedDeviceID;
-}
-
-// Hook BDTuring风控验证
-%hook BDTuringSparkManager
-- (void)verifyWithCompletion:(void (^)(id))completion {
-    HLog(@"🛡️ 拦截BDTuring验证，强制返回成功");
-
-    // 伪造成功结果
-    id result = [[objc_getClass("BDTuringVerifyResult") alloc] init];
-    if (result) {
-        [result setValue:@YES forKey:@"isSuccess"];
-        [result setValue:@"bypass" forKey:@"verifyId"];
-    }
-
-    if (completion) {
-        completion(result);
-    }
-}
-
-- (void)loadSettings:(id)settings completion:(void (^)(id))completion {
-    HLog(@"🛡️ 拦截BDTuring配置加载");
-    if (completion) {
-        completion(nil);
-    }
-}
-%end
-
-// Hook网络可达性检测
-%hook NetworkReachabilityManager
-- (BOOL)isReachable {
-    HLog(@"🛡️ 强制网络可达: YES");
-    return YES;
-}
-
-- (BOOL)isReachableViaWiFi {
-    return YES;
-}
-
-- (BOOL)isReachableViaWWAN {
-    return YES;
-}
-
-- (int)currentReachabilityStatus {
-    return 2; // ReachableViaWiFi
-}
-%end
-
-// Hook设备ID - 随机生成干净的device_id
-%hook NSUserDefaults
-- (id)objectForKey:(NSString *)key {
-    if ([key containsString:@"DeviceID"] || [key isEqualToString:@"kDeviceIDStorageKey"]) {
-        NSString *fakeID = generateRandomDeviceID();
-        HLog(@"🛡️ 替换device_id: %@", fakeID);
-        return fakeID;
-    }
-    return %orig;
-}
-
-- (void)setObject:(id)value forKey:(NSString *)key {
-    // 阻止保存被污染的device_id
-    if ([key containsString:@"DeviceID"] || [key isEqualToString:@"kDeviceIDStorageKey"]) {
-        HLog(@"🛡️ 阻止保存device_id");
-        return;
-    }
-    %orig;
-}
-%end
-
-// Hook网络错误处理 - 吞掉风控错误
-%hook TTNetworkManager
-- (void)handleNetworkError:(NSError *)error {
-    if (error) {
-        HLog(@"🛡️ 拦截网络错误: %@", error.localizedDescription);
-        // 不调用原方法，吞掉错误
-        return;
-    }
-    %orig;
-}
-%end
-
-// Hook AAWEBootChecker - 绕过启动检测
-%hook AAWEBootChecker
-+ (void)load {
-    HLog(@"🛡️ 拦截AAWEBootChecker加载");
-    // 不执行原load方法
-}
-
-- (BOOL)shouldCheckTargetPath:(NSString *)path {
-    HLog(@"🛡️ 跳过路径检测: %@", path);
-    return NO;
-}
-%end
-
-// Hook NSThread - 杀死守护线程
-%hook NSThread
-+ (void)detachNewThreadSelector:(SEL)selector toTarget:(id)target withObject:(id)argument {
-    NSString *selectorName = NSStringFromSelector(selector);
-    NSString *className = NSStringFromClass([target class]);
-
-    // 拦截所有包含Security/Check/Verify/Monitor的线程
-    if ([selectorName rangeOfString:@"check" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-        [selectorName rangeOfString:@"verify" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-        [selectorName rangeOfString:@"monitor" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-        [selectorName rangeOfString:@"detect" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-        [className rangeOfString:@"Security" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-        [className rangeOfString:@"Turing" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-        [className rangeOfString:@"Guard" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-
-        HLogWarning(@"杀死守护线程: [%@ %@]", className, selectorName);
-        return; // 不创建线程
-    }
-
-    %orig;
-}
-%end
-
-// Hook dispatch_after - 杀死延迟检测任务
-%hookf(void, dispatch_after, dispatch_time_t when, dispatch_queue_t queue, dispatch_block_t block) {
-    // 获取调用栈，判断是否来自安全模块
-    NSArray *symbols = [NSThread callStackSymbols];
-    for (NSString *symbol in symbols) {
-        if ([symbol rangeOfString:@"Security" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-            [symbol rangeOfString:@"Turing" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-            [symbol rangeOfString:@"Guard" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-            [symbol rangeOfString:@"Check" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-
-            HLogWarning(@"杀死延迟检测任务，来自: %@", [symbol componentsSeparatedByString:@" "][3]);
-            return; // 不执行延迟任务
-        }
-    }
-
-    %orig;
-}
-
-// Hook dlopen - 阻止加载安全库
-%hookf(void *, dlopen, const char *path, int mode) {
-    if (path) {
-        NSString *pathStr = [NSString stringWithUTF8String:path];
-        if ([pathStr rangeOfString:@"Security" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-            [pathStr rangeOfString:@"Turing" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-            [pathStr rangeOfString:@"Guard" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-
-            HLogWarning(@"阻止加载安全库: %@", pathStr);
-            return NULL; // 返回空，阻止加载
-        }
-    }
-
-    return %orig;
 }
