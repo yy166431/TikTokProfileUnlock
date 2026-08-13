@@ -9,6 +9,7 @@
 #import <netinet/in.h>
 #import <arpa/inet.h>
 #import <unistd.h>
+#import <ifaddrs.h>
 
 #define HLog(fmt, ...) NSLog(@"[TikTokCapture] " fmt, ##__VA_ARGS__)
 
@@ -17,9 +18,11 @@
 
 // 全局变量
 static UIButton *floatingButton = nil;
+static UIView *controlPanel = nil;
 static NSMutableArray *capturedRequests = nil;
 static int captureCount = 0;
 static CFSocketRef serverSocket = NULL;
+static BOOL serverRunning = YES;
 
 // 获取keyWindow（兼容iOS 13+）
 static UIWindow *getKeyWindow() {
@@ -46,6 +49,117 @@ static UIWindow *getKeyWindow() {
         #pragma clang diagnostic pop
     }
     return keyWindow;
+}
+
+// 获取设备IP地址
+static NSString* getDeviceIP() {
+    NSString *address = @"获取中...";
+    struct ifaddrs *interfaces = NULL;
+    struct ifaddrs *temp_addr = NULL;
+    int success = getifaddrs(&interfaces);
+    if (success == 0) {
+        temp_addr = interfaces;
+        while(temp_addr != NULL) {
+            if(temp_addr->ifa_addr->sa_family == AF_INET) {
+                if([[NSString stringWithUTF8String:temp_addr->ifa_name] isEqualToString:@"en0"]) {
+                    address = [NSString stringWithUTF8String:inet_ntoa(((struct sockaddr_in *)temp_addr->ifa_addr)->sin_addr)];
+                }
+            }
+            temp_addr = temp_addr->ifa_next;
+        }
+    }
+    freeifaddrs(interfaces);
+    return address;
+}
+
+// 显示控制面板
+static void showControlPanel() {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (controlPanel) {
+            controlPanel.hidden = NO;
+            return;
+        }
+
+        UIWindow *topWindow = objc_getAssociatedObject(floatingButton, "topWindow");
+        if (!topWindow) return;
+
+        // 半透明背景
+        controlPanel = [[UIView alloc] initWithFrame:topWindow.bounds];
+        controlPanel.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.6];
+
+        // 主面板
+        CGFloat panelWidth = 300;
+        CGFloat panelHeight = 280;
+        UIView *panel = [[UIView alloc] initWithFrame:CGRectMake((topWindow.bounds.size.width - panelWidth)/2,
+                                                                   (topWindow.bounds.size.height - panelHeight)/2,
+                                                                   panelWidth, panelHeight)];
+        panel.backgroundColor = [[UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:0.95] colorWithAlphaComponent:1.0];
+        panel.layer.cornerRadius = 15;
+        panel.layer.masksToBounds = YES;
+
+        // 标题
+        UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 20, panelWidth, 30)];
+        titleLabel.text = @"🎣 TikTok抓包";
+        titleLabel.textColor = [UIColor whiteColor];
+        titleLabel.font = [UIFont boldSystemFontOfSize:20];
+        titleLabel.textAlignment = NSTextAlignmentCenter;
+        [panel addSubview:titleLabel];
+
+        // 抓包数量
+        UILabel *countLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 65, panelWidth-40, 25)];
+        countLabel.text = [NSString stringWithFormat:@"已捕获: %d 条请求", captureCount];
+        countLabel.textColor = [UIColor colorWithRed:0.6 green:0.9 blue:0.6 alpha:1.0];
+        countLabel.font = [UIFont systemFontOfSize:16];
+        countLabel.textAlignment = NSTextAlignmentCenter;
+        [panel addSubview:countLabel];
+
+        // HTTP地址
+        NSString *deviceIP = getDeviceIP();
+        UILabel *urlLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 95, panelWidth-40, 40)];
+        urlLabel.text = [NSString stringWithFormat:@"http://%@:%d", deviceIP, HTTP_PORT];
+        urlLabel.textColor = [UIColor colorWithRed:0.4 green:0.8 blue:1.0 alpha:1.0];
+        urlLabel.font = [UIFont systemFontOfSize:14];
+        urlLabel.textAlignment = NSTextAlignmentCenter;
+        urlLabel.numberOfLines = 2;
+        [panel addSubview:urlLabel];
+
+        // 浏览器查看按钮
+        UIButton *browserBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+        browserBtn.frame = CGRectMake(30, 145, panelWidth-60, 45);
+        [browserBtn setTitle:@"📱 Safari查看数据" forState:UIControlStateNormal];
+        [browserBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        browserBtn.titleLabel.font = [UIFont boldSystemFontOfSize:16];
+        browserBtn.backgroundColor = [UIColor colorWithRed:0.2 green:0.6 blue:1.0 alpha:1.0];
+        browserBtn.layer.cornerRadius = 10;
+        [browserBtn addTarget:browserBtn action:@selector(openBrowser:) forControlEvents:UIControlEventTouchUpInside];
+        [panel addSubview:browserBtn];
+
+        // 关闭按钮
+        UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+        closeBtn.frame = CGRectMake(30, 205, panelWidth-60, 45);
+        [closeBtn setTitle:@"关闭" forState:UIControlStateNormal];
+        [closeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        closeBtn.titleLabel.font = [UIFont systemFontOfSize:15];
+        closeBtn.backgroundColor = [UIColor colorWithRed:0.4 green:0.4 blue:0.4 alpha:1.0];
+        closeBtn.layer.cornerRadius = 10;
+        [closeBtn addTarget:closeBtn action:@selector(hidePanel:) forControlEvents:UIControlEventTouchUpInside];
+        [panel addSubview:closeBtn];
+
+        [controlPanel addSubview:panel];
+        [topWindow addSubview:controlPanel];
+
+        // 存储引用
+        objc_setAssociatedObject(floatingButton, "controlPanel", controlPanel, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    });
+}
+
+// 隐藏控制面板
+static void hideControlPanel() {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (controlPanel) {
+            controlPanel.hidden = YES;
+        }
+    });
 }
 
 // 悬浮窗
@@ -80,6 +194,9 @@ static void createFloatingButton() {
         // 添加拖动手势
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:floatingButton action:@selector(handlePan:)];
         [floatingButton addGestureRecognizer:pan];
+
+        // 添加点击事件
+        [floatingButton addTarget:floatingButton action:@selector(onButtonTap:) forControlEvents:UIControlEventTouchUpInside];
 
         floatingButton.userInteractionEnabled = YES;
 
@@ -339,10 +456,13 @@ static void startHTTPServer() {
 %end
 
 // ============================================
-// UIButton拖动手势处理
+// UIButton拖动手势处理和点击事件
 // ============================================
 @interface UIButton (DragSupport)
 - (void)handlePan:(UIPanGestureRecognizer *)recognizer;
+- (void)onButtonTap:(UIButton *)sender;
+- (void)openBrowser:(UIButton *)sender;
+- (void)hidePanel:(UIButton *)sender;
 @end
 
 @implementation UIButton (DragSupport)
@@ -351,5 +471,21 @@ static void startHTTPServer() {
     CGPoint translation = [recognizer translationInView:view.superview];
     view.center = CGPointMake(view.center.x + translation.x, view.center.y + translation.y);
     [recognizer setTranslation:CGPointZero inView:view.superview];
+}
+
+- (void)onButtonTap:(UIButton *)sender {
+    showControlPanel();
+}
+
+- (void)openBrowser:(UIButton *)sender {
+    NSString *deviceIP = getDeviceIP();
+    NSString *urlString = [NSString stringWithFormat:@"http://%@:%d", deviceIP, HTTP_PORT];
+    NSURL *url = [NSURL URLWithString:urlString];
+    [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+    hideControlPanel();
+}
+
+- (void)hidePanel:(UIButton *)sender {
+    hideControlPanel();
 }
 @end
