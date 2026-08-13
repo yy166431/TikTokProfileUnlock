@@ -19,6 +19,7 @@
 #define HTTP_PORT 9999
 
 // 全局变量
+static UIWindow *floatingWindow = nil;  // 悬浮窗Window，必须强引用防止被释放
 static UIButton *floatingButton = nil;
 static UIView *controlPanel = nil;
 static NSMutableArray *capturedRequests = nil;
@@ -173,11 +174,30 @@ static void hideControlPanel() {
 // 悬浮窗
 static void createFloatingButton() {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (floatingButton) return;
+        if (floatingWindow && floatingButton) return;  // 已创建就不重复
 
-        UIWindow *keyWindow = getKeyWindow();
-        if (!keyWindow) return;
+        // 创建独立的UIWindow，强引用防止被释放
+        floatingWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+        floatingWindow.windowLevel = UIWindowLevelAlert + 100;  // 最高层级
+        floatingWindow.backgroundColor = [UIColor clearColor];
+        floatingWindow.userInteractionEnabled = YES;
+        floatingWindow.hidden = NO;
 
+        // iOS13+ 需要设置windowScene
+        if (@available(iOS 13.0, *)) {
+            UIWindowScene *windowScene = nil;
+            for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+                if ([scene isKindOfClass:[UIWindowScene class]]) {
+                    windowScene = (UIWindowScene *)scene;
+                    break;
+                }
+            }
+            if (windowScene) {
+                floatingWindow.windowScene = windowScene;
+            }
+        }
+
+        // 创建悬浮按钮
         floatingButton = [UIButton buttonWithType:UIButtonTypeCustom];
         floatingButton.frame = CGRectMake(20, 100, 80, 80);
         floatingButton.backgroundColor = [[UIColor redColor] colorWithAlphaComponent:0.8];
@@ -187,9 +207,6 @@ static void createFloatingButton() {
         floatingButton.titleLabel.numberOfLines = 2;
         floatingButton.titleLabel.textAlignment = NSTextAlignmentCenter;
         floatingButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-
-        // 直接加到keyWindow上，不创建新window
-        [keyWindow addSubview:floatingButton];
         floatingButton.userInteractionEnabled = YES;
 
         // 添加长按拖动手势
@@ -201,7 +218,11 @@ static void createFloatingButton() {
         UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:floatingButton action:@selector(onButtonTap:)];
         [floatingButton addGestureRecognizer:tap];
 
-        HLog(@"悬浮窗已创建");
+        // 把按钮加到独立window上
+        [floatingWindow addSubview:floatingButton];
+        [floatingWindow makeKeyAndVisible];
+
+        HLog(@"悬浮窗已创建并强引用");
     });
 }
 
