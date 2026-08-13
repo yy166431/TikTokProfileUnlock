@@ -81,6 +81,20 @@ static NSString* generateHTMLResponse() {
                 [html appendString:@"</div>"];
             }
 
+            if (req[@"requestBody"]) {
+                [html appendString:@"<h2>📤 请求体</h2>"];
+                [html appendFormat:@"<div class='json'>%@</div>", req[@"requestBody"]];
+            }
+
+            if (req[@"responseHeaders"]) {
+                [html appendString:@"<h2>📥 响应头</h2><div class='json'>"];
+                NSDictionary *respHeaders = req[@"responseHeaders"];
+                for (NSString *key in respHeaders) {
+                    [html appendFormat:@"<span class='header'>%@:</span> %@<br>", key, respHeaders[key]];
+                }
+                [html appendString:@"</div>"];
+            }
+
             if (req[@"response"]) {
                 [html appendString:@"<h2>✅ 响应体</h2>"];
                 [html appendFormat:@"<div class='json'>%@</div>", req[@"response"]];
@@ -186,10 +200,12 @@ static void startHTTPServer() {
 
     NSString *urlString = request.URL.absoluteString;
 
-    // 只拦截TikTok/抖音个人中心相关的API
-    if ([urlString containsString:@"tiktok/user/profile"] ||
-        [urlString containsString:@"/aweme/v1/user"] ||
-        [urlString containsString:@"api"] && ([urlString containsString:@"profile"] || [urlString containsString:@"user"])) {
+    // 只拦截TikTok/抖音的API请求（放宽过滤条件，确保不遗漏）
+    if ([urlString containsString:@"tiktok"] ||
+        [urlString containsString:@"aweme"] ||
+        [urlString containsString:@"musically"] ||
+        [urlString containsString:@"api"] ||
+        [urlString containsString:@"byteoversea"]) {
 
         HLog(@"🎯 拦截到请求: %@", urlString);
 
@@ -198,18 +214,24 @@ static void startHTTPServer() {
         formatter.dateFormat = @"yyyy-MM-dd HH:mm:ss";
         NSString *timeStr = [formatter stringFromDate:[NSDate date]];
 
-        // 收集请求头
+        // 收集请求头（所有请求头，包括设备指纹）
         NSMutableDictionary *headers = [NSMutableDictionary dictionary];
         [request.allHTTPHeaderFields enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSString *value, BOOL *stop) {
             headers[key] = value;
         }];
+
+        // 收集请求体（如果是POST/PUT等）
+        NSString *requestBody = nil;
+        if (request.HTTPBody) {
+            requestBody = [[NSString alloc] initWithData:request.HTTPBody encoding:NSUTF8StringEncoding];
+        }
 
         // Hook completionHandler
         void (^newHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
             if (data && response) {
                 NSString *responseBody = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
 
-                // 格式化JSON
+                // 格式化JSON响应体
                 NSString *prettyJSON = responseBody;
                 NSError *jsonError = nil;
                 id jsonObj = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
@@ -218,15 +240,30 @@ static void startHTTPServer() {
                     prettyJSON = [[NSString alloc] initWithData:prettyData encoding:NSUTF8StringEncoding];
                 }
 
-                // 保存到数组
+                // 收集响应头（重要！包括服务器返回的所有头）
+                NSMutableDictionary *responseHeaders = [NSMutableDictionary dictionary];
+                if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
+                    NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
+                    [httpResponse.allHeaderFields enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSString *value, BOOL *stop) {
+                        responseHeaders[key] = value;
+                    }];
+                }
+
+                // 保存到数组（完整数据）
                 @synchronized(capturedRequests) {
-                    NSDictionary *capturedData = @{
+                    NSMutableDictionary *capturedData = [@{
                         @"time": timeStr,
                         @"url": urlString,
                         @"method": request.HTTPMethod ?: @"GET",
                         @"headers": headers,
-                        @"response": prettyJSON ?: @"(无法解析响应)"
-                    };
+                        @"response": prettyJSON ?: @"(无法解析响应)",
+                        @"responseHeaders": responseHeaders
+                    } mutableCopy];
+
+                    // 如果有请求体，添加进去
+                    if (requestBody) {
+                        capturedData[@"requestBody"] = requestBody;
+                    }
 
                     [capturedRequests addObject:capturedData];
 
