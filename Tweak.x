@@ -89,18 +89,18 @@ static void showControlPanel() {
             return;
         }
 
-        UIWindow *topWindow = objc_getAssociatedObject(floatingButton, "topWindow");
-        if (!topWindow) return;
+        UIWindow *keyWindow = getKeyWindow();
+        if (!keyWindow) return;
 
         // 半透明背景
-        controlPanel = [[UIView alloc] initWithFrame:topWindow.bounds];
+        controlPanel = [[UIView alloc] initWithFrame:keyWindow.bounds];
         controlPanel.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.6];
 
         // 主面板
         CGFloat panelWidth = 300;
         CGFloat panelHeight = 280;
-        UIView *panel = [[UIView alloc] initWithFrame:CGRectMake((topWindow.bounds.size.width - panelWidth)/2,
-                                                                   (topWindow.bounds.size.height - panelHeight)/2,
+        UIView *panel = [[UIView alloc] initWithFrame:CGRectMake((keyWindow.bounds.size.width - panelWidth)/2,
+                                                                   (keyWindow.bounds.size.height - panelHeight)/2,
                                                                    panelWidth, panelHeight)];
         panel.backgroundColor = [[UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:0.95] colorWithAlphaComponent:1.0];
         panel.layer.cornerRadius = 15;
@@ -155,10 +155,9 @@ static void showControlPanel() {
         [panel addSubview:closeBtn];
 
         [controlPanel addSubview:panel];
-        [topWindow addSubview:controlPanel];
+        [keyWindow addSubview:controlPanel];
 
-        // 存储引用
-        objc_setAssociatedObject(floatingButton, "controlPanel", controlPanel, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        HLog(@"控制面板已显示");
     });
 }
 
@@ -189,33 +188,18 @@ static void createFloatingButton() {
         floatingButton.titleLabel.textAlignment = NSTextAlignmentCenter;
         floatingButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
 
-        // 确保在最顶层显示
-        UIWindow *topWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-        topWindow.windowLevel = UIWindowLevelAlert + 1;
-        topWindow.backgroundColor = [UIColor clearColor];
-        topWindow.hidden = NO;
-        topWindow.userInteractionEnabled = NO; // 整个window不响应事件，只让按钮响应
-        [topWindow addSubview:floatingButton];
-
-        // 存储window引用防止释放
-        objc_setAssociatedObject(floatingButton, "topWindow", topWindow, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        // 直接加到keyWindow上，不创建新window
+        [keyWindow addSubview:floatingButton];
+        floatingButton.userInteractionEnabled = YES;
 
         // 添加长按拖动手势
         UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:floatingButton action:@selector(handleLongPress:)];
         longPress.minimumPressDuration = 0.3;
         [floatingButton addGestureRecognizer:longPress];
 
-        // 添加点击手势（用手势识别器，不用addTarget避免冲突）
+        // 添加点击手势
         UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:floatingButton action:@selector(onButtonTap:)];
         [floatingButton addGestureRecognizer:tap];
-
-        // 关键：只有按钮本身响应事件
-        floatingButton.userInteractionEnabled = YES;
-
-        // 让按钮能接收topWindow之外的点击事件
-        topWindow.userInteractionEnabled = YES;
-        topWindow.rootViewController = [[UIViewController alloc] init];
-        topWindow.rootViewController.view.userInteractionEnabled = NO; // rootView不响应
 
         HLog(@"悬浮窗已创建");
     });
