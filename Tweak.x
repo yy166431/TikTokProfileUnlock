@@ -22,7 +22,6 @@ static UIView *controlPanel = nil;
 static NSMutableArray *capturedRequests = nil;
 static int captureCount = 0;
 static CFSocketRef serverSocket = NULL;
-static BOOL serverRunning = YES;
 
 // 获取keyWindow（兼容iOS 13+）
 static UIWindow *getKeyWindow() {
