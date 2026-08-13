@@ -20,12 +20,39 @@ static NSMutableArray *capturedRequests = nil;
 static int captureCount = 0;
 static CFSocketRef serverSocket = NULL;
 
+// 获取keyWindow（兼容iOS 13+）
+static UIWindow *getKeyWindow() {
+    UIWindow *keyWindow = nil;
+    if (@available(iOS 13.0, *)) {
+        NSSet<UIScene *> *connectedScenes = [UIApplication sharedApplication].connectedScenes;
+        for (UIScene *scene in connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene *windowScene = (UIWindowScene *)scene;
+                for (UIWindow *window in windowScene.windows) {
+                    if (window.isKeyWindow) {
+                        keyWindow = window;
+                        break;
+                    }
+                }
+            }
+            if (keyWindow) break;
+        }
+    }
+    if (!keyWindow) {
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        keyWindow = [UIApplication sharedApplication].keyWindow;
+        #pragma clang diagnostic pop
+    }
+    return keyWindow;
+}
+
 // 悬浮窗
 static void createFloatingButton() {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (floatingButton) return;
 
-        UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
+        UIWindow *keyWindow = getKeyWindow();
         if (!keyWindow) return;
 
         floatingButton = [UIButton buttonWithType:UIButtonTypeCustom];
