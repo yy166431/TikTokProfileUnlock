@@ -98,36 +98,56 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
 
         captureCount++;
 
+        // Log raw data for debugging
+        NSLog(@"[TikTokHeaders] Raw x26 data (first 500 chars): %@",
+              [raw substringToIndex:MIN(500, raw.length)]);
+
         // Extract signature headers with larger buffer sizes
         NSString *argus = extractValue(raw, @"x-argus", 500);
         NSString *gorgon = extractValue(raw, @"x-gorgon", 100);
         NSString *khronos = extractValue(raw, @"x-khronos", 20);
         NSString *ladon = extractValue(raw, @"x-ladon", 2000);
 
-        // Extract complete query string - find musical_ly and read until HTTP/ or line break
+        // Also try alternative argus patterns
+        if (argus.length == 0) {
+            argus = extractValue(raw, @"X-Argus", 500);
+        }
+        if (argus.length == 0) {
+            argus = extractValue(raw, @"argus", 500);
+        }
+
+        NSLog(@"[TikTokHeaders] Extracted - argus=%@, gorgon=%@, khronos=%@, ladon_len=%lu",
+              argus.length > 0 ? [argus substringToIndex:MIN(20, argus.length)] : @"(empty)",
+              gorgon.length > 0 ? [gorgon substringToIndex:MIN(20, gorgon.length)] : @"(empty)",
+              khronos, (unsigned long)ladon.length);
+
+        // Extract complete query string - find musical_ly and read until non-URL character
         NSString *query = @"";
         NSRange musicalRange = [raw rangeOfString:@"musical_ly"];
         if (musicalRange.location != NSNotFound) {
             NSString *qStr = [raw substringFromIndex:musicalRange.location];
-            // Find end markers
-            NSInteger endPos = MIN(qStr.length, 3000);  // Max query length
+            NSInteger endPos = 0;
 
-            NSRange httpRange = [qStr rangeOfString:@" HTTP/"];
-            if (httpRange.location != NSNotFound && httpRange.location < endPos) {
-                endPos = httpRange.location;
+            // Scan character by character for valid URL chars
+            for (NSInteger i = 0; i < qStr.length && i < 3000; i++) {
+                unichar ch = [qStr characterAtIndex:i];
+                // Valid URL characters: a-z A-Z 0-9 - _ . ~ : / ? # [ ] @ ! $ & ' ( ) * + , ; = %
+                if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                    (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' ||
+                    ch == '.' || ch == '~' || ch == ':' || ch == '/' ||
+                    ch == '?' || ch == '#' || ch == '[' || ch == ']' ||
+                    ch == '@' || ch == '!' || ch == '$' || ch == '&' ||
+                    ch == '\'' || ch == '(' || ch == ')' || ch == '*' ||
+                    ch == '+' || ch == ',' || ch == ';' || ch == '=' || ch == '%') {
+                    endPos = i + 1;
+                } else {
+                    break;
+                }
             }
 
-            NSRange crlf = [qStr rangeOfString:@"\r\n"];
-            if (crlf.location != NSNotFound && crlf.location < endPos) {
-                endPos = crlf.location;
+            if (endPos > 0) {
+                query = [qStr substringToIndex:endPos];
             }
-
-            NSRange lf = [qStr rangeOfString:@"\n"];
-            if (lf.location != NSNotFound && lf.location < endPos) {
-                endPos = lf.location;
-            }
-
-            query = [[qStr substringToIndex:endPos] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         }
 
         // Build complete URL
