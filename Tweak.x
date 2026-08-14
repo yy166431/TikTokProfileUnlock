@@ -65,8 +65,8 @@ static NSString* generateHTML() {
                 [html appendFormat:@"<span class='label'>Request Headers:</span><pre class='json'>%@</pre>", jsonStr];
             }
         }
-        if (item[@"headers"]) {
-            NSData *jsonData = [NSJSONSerialization dataWithJSONObject:item[@"headers"] options:NSJSONWritingPrettyPrinted error:nil];
+        if (item[@"response_headers"]) {
+            NSData *jsonData = [NSJSONSerialization dataWithJSONObject:item[@"response_headers"] options:NSJSONWritingPrettyPrinted error:nil];
             if (jsonData) {
                 NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
                 [html appendFormat:@"<span class='label'>Response Headers:</span><pre class='json'>%@</pre>", jsonStr];
@@ -460,17 +460,20 @@ static void closeDataWindow() {
     if (url) {
         NSString *urlStr = [url absoluteString];
         if ([urlStr containsString:@"profile/self/v1"]) {
-            NSMutableDictionary *capture = [NSMutableDictionary new];
-            capture[@"id"] = @(++captureCount);
-            capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
-            capture[@"type"] = @"request";
-            capture[@"url"] = urlStr;
-            capture[@"method"] = [self HTTPMethod] ?: @"GET";
-            capture[@"headers"] = [self allHTTPHeaderFields] ?: @{};
-            capture[@"body"] = [self HTTPBody] ? [[NSString alloc] initWithData:[self HTTPBody] encoding:NSUTF8StringEncoding] : @"";
+            // 保存请求信息到 pendingRequests，等待响应关联
+            if (!pendingRequests) {
+                pendingRequests = [NSMutableDictionary new];
+            }
 
-            [capturedData addObject:capture];
-            NSLog(@"[TKCapture] ★ Request #%d: %@", captureCount, urlStr);
+            NSString *threadId = [NSString stringWithFormat:@"%p", [NSThread currentThread]];
+            pendingRequests[threadId] = @{
+                @"url": urlStr,
+                @"headers": [self allHTTPHeaderFields] ?: @{},
+                @"timestamp": @([[NSDate date] timeIntervalSince1970])
+            };
+
+            NSLog(@"[TKCapture] → Request created: %@", urlStr);
+            NSLog(@"[TKCapture] → Request Headers: %@", [self allHTTPHeaderFields]);
         }
     }
 
@@ -483,17 +486,20 @@ static void closeDataWindow() {
     if (url) {
         NSString *urlStr = [url absoluteString];
         if ([urlStr containsString:@"profile/self/v1"]) {
-            NSMutableDictionary *capture = [NSMutableDictionary new];
-            capture[@"id"] = @(++captureCount);
-            capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
-            capture[@"type"] = @"request";
-            capture[@"url"] = urlStr;
-            capture[@"method"] = [self HTTPMethod] ?: @"GET";
-            capture[@"headers"] = [self allHTTPHeaderFields] ?: @{};
-            capture[@"body"] = [self HTTPBody] ? [[NSString alloc] initWithData:[self HTTPBody] encoding:NSUTF8StringEncoding] : @"";
+            // 保存请求信息到 pendingRequests，等待响应关联
+            if (!pendingRequests) {
+                pendingRequests = [NSMutableDictionary new];
+            }
 
-            [capturedData addObject:capture];
-            NSLog(@"[TKCapture] ★ Request #%d: %@", captureCount, urlStr);
+            NSString *threadId = [NSString stringWithFormat:@"%p", [NSThread currentThread]];
+            pendingRequests[threadId] = @{
+                @"url": urlStr,
+                @"headers": [self allHTTPHeaderFields] ?: @{},
+                @"timestamp": @([[NSDate date] timeIntervalSince1970])
+            };
+
+            NSLog(@"[TKCapture] → Request created (with policy): %@", urlStr);
+            NSLog(@"[TKCapture] → Request Headers: %@", [self allHTTPHeaderFields]);
         }
     }
 
@@ -552,35 +558,44 @@ static void closeDataWindow() {
             capture[@"type"] = @"response_complete";
             capture[@"url"] = urlStr;
             capture[@"response_headers"] = headers ?: @{};
+            capture[@"method"] = @"GET";  // profile/self/v1 是 GET 请求
 
-            // 尝试获取请求头：遍历对象的所有 ivar 查找 request 对象
-            @try {
-                unsigned int ivarCount = 0;
-                Ivar *ivars = class_copyIvarList([self class], &ivarCount);
+            // 尝试从 pendingRequests 获取之前保存的请求头
+            NSString *threadId = [NSString stringWithFormat:@"%p", [NSThread currentThread]];
+            NSDictionary *pendingReq = pendingRequests[threadId];
+            if (pendingReq && [pendingReq[@"url"] isEqualToString:urlStr]) {
+                capture[@"request_headers"] = pendingReq[@"headers"] ?: @{};
+                [pendingRequests removeObjectForKey:threadId];
+                NSLog(@"[TKCapture] ✓ Found request headers from pending cache");
+            } else {
+                // 尝试通过反射获取请求头
+                @try {
+                    unsigned int ivarCount = 0;
+                    Ivar *ivars = class_copyIvarList([self class], &ivarCount);
 
-                for (unsigned int i = 0; i < ivarCount; i++) {
-                    Ivar ivar = ivars[i];
-                    const char *ivarName = ivar_getName(ivar);
-                    NSString *name = [NSString stringWithUTF8String:ivarName];
+                    for (unsigned int i = 0; i < ivarCount; i++) {
+                        Ivar ivar = ivars[i];
+                        const char *ivarName = ivar_getName(ivar);
+                        NSString *name = [NSString stringWithUTF8String:ivarName];
 
-                    // 查找名字包含 request 的属性
-                    if ([name.lowercaseString containsString:@"request"]) {
-                        id value = object_getIvar(self, ivar);
+                        // 查找名字包含 request 的属性
+                        if ([name.lowercaseString containsString:@"request"]) {
+                            id value = object_getIvar(self, ivar);
 
-                        // 如果是 NSURLRequest 类型
-                        if ([value isKindOfClass:[NSURLRequest class]]) {
-                            NSURLRequest *request = (NSURLRequest *)value;
-                            capture[@"request_headers"] = [request allHTTPHeaderFields] ?: @{};
-                            capture[@"method"] = [request HTTPMethod] ?: @"GET";
-                            NSLog(@"[TKCapture] ✓ Found request in ivar: %@", name);
-                            break;
+                            // 如果是 NSURLRequest 类型
+                            if ([value isKindOfClass:[NSURLRequest class]]) {
+                                NSURLRequest *request = (NSURLRequest *)value;
+                                capture[@"request_headers"] = [request allHTTPHeaderFields] ?: @{};
+                                NSLog(@"[TKCapture] ✓ Found request in ivar: %@", name);
+                                break;
+                            }
                         }
                     }
-                }
 
-                if (ivars) free(ivars);
-            } @catch (NSException *e) {
-                NSLog(@"[TKCapture] Exception while finding request: %@", e);
+                    if (ivars) free(ivars);
+                } @catch (NSException *e) {
+                    NSLog(@"[TKCapture] Exception while finding request: %@", e);
+                }
             }
 
             [capturedData addObject:capture];
