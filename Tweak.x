@@ -57,11 +57,6 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
             return result;
         }
 
-        // Only capture profile/self requests
-        if ([raw rangeOfString:@"profile/self"].location == NSNotFound) {
-            return result;
-        }
-
         captureCount++;
 
         // Parse headers and URL from raw data - improved parsing
