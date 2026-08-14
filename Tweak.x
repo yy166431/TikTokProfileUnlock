@@ -22,7 +22,7 @@ static UIWindow *dataWindow = nil;
 // Original memcmp
 static int (*original_memcmp)(const void *, const void *, size_t);
 
-// Extract headers from x26 register data
+// Extract headers from x26 register data - improved to handle null bytes
 static NSString* extractValue(NSString *raw, NSString *key, int maxLen) {
     NSRange range = [raw rangeOfString:key];
     if (range.location == NSNotFound) return @"";
@@ -30,20 +30,35 @@ static NSString* extractValue(NSString *raw, NSString *key, int maxLen) {
     NSInteger start = range.location + key.length;
     if (start >= raw.length) return @"";
 
+    // Skip colon and spaces if present
+    while (start < raw.length && ([raw characterAtIndex:start] == ':' || [raw characterAtIndex:start] == ' ')) {
+        start++;
+    }
+    if (start >= raw.length) return @"";
+
     NSString *sub = [raw substringFromIndex:start];
 
-    // Find next header marker or special char
-    NSArray *markers = @[@"x-gorgon", @"x-khronos", @"x-ladon", @"x-argus", @"x-common", @"\r", @"\n", @";"];
+    // Find next header marker, special char, or null byte
+    NSArray *markers = @[@"x-gorgon", @"x-khronos", @"x-ladon", @"x-argus", @"x-common", @"\r\n", @"\r", @"\n", @";", @" HTTP/"];
     NSInteger minPos = maxLen < sub.length ? maxLen : sub.length;
 
     for (NSString *m in markers) {
         NSRange r = [sub rangeOfString:m];
-        if (r.location != NSNotFound && r.location < minPos) {
+        if (r.location != NSNotFound && r.location > 0 && r.location < minPos) {
             minPos = r.location;
         }
     }
 
-    return [sub substringToIndex:minPos];
+    // Check for null bytes
+    for (NSInteger i = 0; i < minPos && i < sub.length; i++) {
+        if ([sub characterAtIndex:i] == 0) {
+            minPos = i;
+            break;
+        }
+    }
+
+    NSString *result = [sub substringToIndex:minPos];
+    return [result stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
 // Hooked memcmp - capture signatures from x26
@@ -67,11 +82,12 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
 
         if (!x26_ptr) return result;
 
-        // Read x26 memory safely - increased buffer size for complete capture
+        // Read x26 memory aggressively - scan large buffer to capture everything
         NSString *raw = nil;
         @try {
             const char *data = (const char *)x26_ptr;
-            raw = [[NSString alloc] initWithBytes:data length:4096 encoding:NSUTF8StringEncoding];
+            // Read up to 8KB to ensure complete capture
+            raw = [[NSString alloc] initWithBytes:data length:8192 encoding:NSUTF8StringEncoding];
         } @catch (NSException *e) {
             return result;
         }
@@ -82,26 +98,35 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
 
         captureCount++;
 
-        // Extract signature headers
-        NSString *argus = extractValue(raw, @"x-argus", 200);
-        NSString *gorgon = extractValue(raw, @"x-gorgon", 52);
-        NSString *khronos = extractValue(raw, @"x-khronos", 10);
-        NSString *ladon = extractValue(raw, @"x-ladon", 800);
+        // Extract signature headers with larger buffer sizes
+        NSString *argus = extractValue(raw, @"x-argus", 500);
+        NSString *gorgon = extractValue(raw, @"x-gorgon", 100);
+        NSString *khronos = extractValue(raw, @"x-khronos", 20);
+        NSString *ladon = extractValue(raw, @"x-ladon", 2000);
 
-        // Extract Query parameters - more permissive regex to capture full query string
+        // Extract complete query string - find musical_ly and read until HTTP/ or line break
         NSString *query = @"";
         NSRange musicalRange = [raw rangeOfString:@"musical_ly"];
         if (musicalRange.location != NSNotFound) {
             NSString *qStr = [raw substringFromIndex:musicalRange.location];
-            // Find end of query string (before next header or line break)
-            NSArray *endMarkers = @[@"\r\n", @"\n", @"x-gorgon", @"x-argus", @"x-khronos", @"x-ladon", @"HTTP/"];
-            NSInteger endPos = qStr.length;
-            for (NSString *marker in endMarkers) {
-                NSRange r = [qStr rangeOfString:marker];
-                if (r.location != NSNotFound && r.location < endPos) {
-                    endPos = r.location;
-                }
+            // Find end markers
+            NSInteger endPos = MIN(qStr.length, 3000);  // Max query length
+
+            NSRange httpRange = [qStr rangeOfString:@" HTTP/"];
+            if (httpRange.location != NSNotFound && httpRange.location < endPos) {
+                endPos = httpRange.location;
             }
+
+            NSRange crlf = [qStr rangeOfString:@"\r\n"];
+            if (crlf.location != NSNotFound && crlf.location < endPos) {
+                endPos = crlf.location;
+            }
+
+            NSRange lf = [qStr rangeOfString:@"\n"];
+            if (lf.location != NSNotFound && lf.location < endPos) {
+                endPos = lf.location;
+            }
+
             query = [[qStr substringToIndex:endPos] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         }
 
