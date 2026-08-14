@@ -96,7 +96,13 @@ static void scanMemoryForUserData() {
 
                                                     // 悬浮窗提示
                                                     dispatch_async(dispatch_get_main_queue(), ^{
-                                                        UIWindow *keyWindow = [[UIApplication sharedApplication] keyWindow];
+                                                        UIWindow *keyWindow = nil;
+                                                        for (UIWindow *window in [[UIApplication sharedApplication] windows]) {
+                                                            if (window.isKeyWindow) {
+                                                                keyWindow = window;
+                                                                break;
+                                                            }
+                                                        }
                                                         if (keyWindow) {
                                                             UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 100, 300, 80)];
                                                             label.text = [NSString stringWithFormat:@"✅ 内存扫到数据!\n共%d条", g_found_count];
@@ -151,7 +157,13 @@ static void scanMemoryForUserData() {
 
     // 启动提示
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        UIWindow *keyWindow = [[UIApplication sharedApplication] keyWindow];
+        UIWindow *keyWindow = nil;
+        for (UIWindow *window in [[UIApplication sharedApplication] windows]) {
+            if (window.isKeyWindow) {
+                keyWindow = window;
+                break;
+            }
+        }
         if (keyWindow) {
             UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 50, 250, 50)];
             label.text = @"🔍 内存扫描已启动";
