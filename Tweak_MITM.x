@@ -78,8 +78,10 @@ static FloatingButton *floatingButton = nil;
 
 @interface MITMProxy : NSObject
 @property (nonatomic, assign) BOOL captured;
+@property (nonatomic, strong) NSString *capturedData;
 + (instancetype)shared;
 - (void)startProxy;
+- (void)startWebServer;
 - (void)saveData:(NSString *)url headers:(NSDictionary *)headers body:(NSString *)body;
 @end
 
@@ -134,6 +136,122 @@ static MITMProxy *proxy = nil;
         close(sock);
         NSLog(@"[MITM] 🎉 Captured! Proxy stopped.");
     });
+}
+
+- (void)startWebServer {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSLog(@"[MITM] 🌐 Starting web server on port 9999...");
+
+        int sock = socket(AF_INET, SOCK_STREAM, 0);
+        int reuse = 1;
+        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = INADDR_ANY;
+        addr.sin_port = htons(9999);
+
+        if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+            NSLog(@"[MITM] ❌ Web server bind failed");
+            return;
+        }
+
+        listen(sock, 10);
+        NSLog(@"[MITM] ✅ Web server at http://192.168.9.102:9999/");
+
+        while (YES) {
+            struct sockaddr_in clientAddr;
+            socklen_t len = sizeof(clientAddr);
+            int client = accept(sock, (struct sockaddr *)&clientAddr, &len);
+
+            if (client < 0) continue;
+
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                [self handleWebClient:client];
+            });
+        }
+    });
+}
+
+- (void)handleWebClient:(int)client {
+    char buf[4096];
+    ssize_t n = recv(client, buf, sizeof(buf) - 1, 0);
+
+    if (n <= 0) {
+        close(client);
+        return;
+    }
+
+    buf[n] = '\0';
+    NSString *request = [NSString stringWithUTF8String:buf];
+
+    // 检查是否请求下载
+    if ([request containsString:@"GET /download"]) {
+        NSString *data = self.capturedData ?: @"No data captured yet.";
+        NSData *dataBytes = [data dataUsingEncoding:NSUTF8StringEncoding];
+
+        NSString *response = [NSString stringWithFormat:
+            @"HTTP/1.1 200 OK\r\n"
+            @"Content-Type: text/plain; charset=utf-8\r\n"
+            @"Content-Disposition: attachment; filename=\"tiktok_capture.txt\"\r\n"
+            @"Content-Length: %lu\r\n"
+            @"Connection: close\r\n"
+            @"\r\n",
+            (unsigned long)dataBytes.length
+        ];
+
+        send(client, [response UTF8String], response.length, 0);
+        send(client, dataBytes.bytes, dataBytes.length, 0);
+    } else {
+        // 返回 HTML 界面
+        NSString *html = [self generateHTML];
+        NSString *response = [NSString stringWithFormat:
+            @"HTTP/1.1 200 OK\r\n"
+            @"Content-Type: text/html; charset=utf-8\r\n"
+            @"Content-Length: %lu\r\n"
+            @"Connection: close\r\n"
+            @"\r\n%@",
+            (unsigned long)html.length, html
+        ];
+
+        send(client, [response UTF8String], response.length, 0);
+    }
+
+    close(client);
+}
+
+- (NSString *)generateHTML {
+    NSString *status = self.captured ? @"✅ 已捕获" : @"⏳ 等待中...";
+    NSString *color = self.captured ? @"#4ade80" : @"#fbbf24";
+    NSString *data = self.capturedData ?: @"<p style='color:#666'>尚未捕获数据，请在 TikTok 内刷新个人主页...</p>";
+    NSString *downloadBtn = self.captured ?
+        @"<a href='/download' download='tiktok_capture.txt' style='display:inline-block;margin:20px 0;padding:15px 30px;background:#4ade80;color:#000;text-decoration:none;border-radius:8px;font-weight:bold'>📥 下载数据</a>" :
+        @"";
+
+    return [NSString stringWithFormat:
+        @"<!DOCTYPE html>"
+        @"<html><head>"
+        @"<meta charset='utf-8'>"
+        @"<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        @"<title>TikTok MITM Proxy</title>"
+        @"<style>"
+        @"*{margin:0;padding:0;box-sizing:border-box}"
+        @"body{font-family:-apple-system,system-ui,sans-serif;background:#0f0f0f;color:#e5e5e5;padding:20px}"
+        @"h1{font-size:24px;margin-bottom:10px}"
+        @".status{display:inline-block;padding:8px 16px;background:%@;color:#000;border-radius:20px;font-weight:bold;margin-bottom:20px}"
+        @"pre{background:#1a1a1a;padding:20px;border-radius:8px;overflow-x:auto;font-size:13px;line-height:1.6;border:1px solid #333}"
+        @"</style>"
+        @"</head><body>"
+        @"<h1>🎯 TikTok MITM Proxy</h1>"
+        @"<div class='status'>%@</div>"
+        @"%@"
+        @"<pre>%@</pre>"
+        @"<script>setTimeout(()=>location.reload(),5000)</script>"
+        @"</body></html>",
+        color, status, downloadBtn,
+        [data stringByReplacingOccurrencesOfString:@"<" withString:@"&lt;"]
+    ];
 }
 
 - (void)handleClient:(int)client {
@@ -204,6 +322,9 @@ static MITMProxy *proxy = nil;
     [output appendString:@"\n[RESPONSE BODY]\n"];
     [output appendFormat:@"%@\n", body];
 
+    // 保存到内存
+    self.capturedData = output;
+
     // 保存到沙盒
     NSString *docPath = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
     NSString *filePath = [docPath stringByAppendingPathComponent:@"tiktok_profile_captured.txt"];
@@ -265,7 +386,11 @@ static MITMProxy *proxy = nil;
         // 启动代理
         [[MITMProxy shared] startProxy];
 
+        // 启动 Web 服务器
+        [[MITMProxy shared] startWebServer];
+
         NSLog(@"[MITM] ✅ All services started");
         NSLog(@"[MITM] 📱 Refresh TikTok profile page now!");
+        NSLog(@"[MITM] 🌐 Web UI: http://192.168.9.102:9999/");
     });
 }
