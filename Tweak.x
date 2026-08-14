@@ -60,7 +60,7 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
         captureCount++;
 
         // Parse headers and URL from raw data - improved parsing
-        NSString *argus = @"", *gorgon = @"", *khronos = @"", *ladon = @"", *query = @"";
+        NSString *argus = @"", *gorgon = @"", *khronos = @"", *ladon = @"";
         NSString *ttToken = @"", *userAgent = @"";
 
         // Extract x-argus (format: x-argus=VALUE or x-argus: VALUE or x-argusVALUE)
