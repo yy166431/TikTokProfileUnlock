@@ -17,6 +17,8 @@ static CFSocketRef serverSocket = NULL;
 static int captureCount = 0;
 static UIButton *floatingButton = nil;
 static UIWindow *dataWindow = nil;
+static dispatch_source_t x26Timer = nil;
+static NSMutableSet *processedSignatures = nil;
 
 // Helper to add debug log
 static void addDebugLog(NSString *message) {
@@ -28,7 +30,162 @@ static void addDebugLog(NSString *message) {
     NSLog(@"[TikTokHeaders] %@", message);
 }
 
-// ==================== memcmp Hook ====================
+// ==================== X26 Register Scanner ====================
+
+// Process captured x26 data
+static void processX26Data(NSString *raw) {
+    if (!raw || raw.length < 100) return;
+
+    // Check if contains x-gorgon
+    if ([raw rangeOfString:@"x-gorgon"].location == NSNotFound) return;
+
+    // Use x-gorgon value as signature to avoid duplicate processing
+    NSString *gorgon = extractHeader(raw, @"x-gorgon");
+    if (!gorgon || gorgon.length == 0) return;
+
+    @synchronized(processedSignatures) {
+        if ([processedSignatures containsObject:gorgon]) {
+            return; // Already processed
+        }
+        [processedSignatures addObject:gorgon];
+
+        // Keep only last 100 signatures to avoid memory leak
+        if (processedSignatures.count > 100) {
+            [processedSignatures removeAllObjects];
+        }
+    }
+
+    addDebugLog([NSString stringWithFormat:@"x26 scanner captured! gorgon=%.20@...", gorgon]);
+
+    captureCount++;
+
+    // Extract all headers
+    NSString *argus = extractHeader(raw, @"x-argus");
+    NSString *khronos = extractHeader(raw, @"x-khronos");
+    NSString *ladon = extractHeader(raw, @"x-ladon");
+    NSString *ttToken = extractHeader(raw, @"x-tt-token");
+    NSString *userAgent = extractHeader(raw, @"user-agent");
+    NSString *cookie = extractHeader(raw, @"cookie");
+    NSString *ttPbaEncode = extractHeader(raw, @"x-tt-pba-encode");
+    NSString *vcBdturingSdkVersion = extractHeader(raw, @"x-vc-bdturing-sdk-version");
+    NSString *passportSdkVersion = extractHeader(raw, @"passport-sdk-version");
+    NSString *pnsAttEnable = extractHeader(raw, @"pns-att-enable");
+    NSString *oecVcSdkVersion = extractHeader(raw, @"oec-vc-sdk-version");
+    NSString *ttRequestTag = extractHeader(raw, @"x-tt-request-tag");
+    NSString *rpcPersistPnsRegion1 = extractHeader(raw, @"rpc-persist-pns-region-1");
+    NSString *ttStoreRegion = extractHeader(raw, @"x-tt-store-region");
+    NSString *ttStoreRegionSrc = extractHeader(raw, @"x-tt-store-region-src");
+    NSString *rpcPersistPyxisPolicyVTnc = extractHeader(raw, @"rpc-persist-pyxis-policy-v-tnc");
+    NSString *ssDp = extractHeader(raw, @"x-ss-dp");
+    NSString *ttTraceId = extractHeader(raw, @"x-tt-trace-id");
+    NSString *acceptEncoding = extractHeader(raw, @"accept-encoding");
+
+    // Extract URL
+    NSString *fullURL = @"";
+    NSArray *apiPaths = @[@"api22-normal", @"api16-normal", @"api19-normal", @"api21-normal", @"api-va", @"/aweme/", @"/effect/"];
+    for (NSString *apiPath in apiPaths) {
+        NSRange apiRange = [raw rangeOfString:apiPath];
+        if (apiRange.location != NSNotFound) {
+            NSInteger start = apiRange.location;
+            while (start > 0) {
+                unichar ch = [raw characterAtIndex:start - 1];
+                if (ch == ' ' || ch == '\n' || ch == '\r') break;
+                start--;
+            }
+            NSInteger end = apiRange.location + apiRange.length;
+            while (end < raw.length) {
+                unichar ch = [raw characterAtIndex:end];
+                if (ch == ' ' || ch == '\n' || ch == '\r') break;
+                end++;
+            }
+            fullURL = [raw substringWithRange:NSMakeRange(start, end - start)];
+            if (![fullURL hasPrefix:@"http"]) {
+                fullURL = [@"https://" stringByAppendingString:fullURL];
+            }
+            break;
+        }
+    }
+
+    NSDictionary *item = @{
+        @"id": @(captureCount),
+        @"timestamp": [[NSDate date] description],
+        @"url": fullURL,
+        @"headers": @{
+            @"x-argus": argus,
+            @"x-gorgon": gorgon,
+            @"x-khronos": khronos,
+            @"x-ladon": ladon,
+            @"x-tt-token": ttToken,
+            @"user-agent": userAgent,
+            @"cookie": cookie,
+            @"x-tt-pba-encode": ttPbaEncode,
+            @"x-vc-bdturing-sdk-version": vcBdturingSdkVersion,
+            @"passport-sdk-version": passportSdkVersion,
+            @"pns-att-enable": pnsAttEnable,
+            @"oec-vc-sdk-version": oecVcSdkVersion,
+            @"x-tt-request-tag": ttRequestTag,
+            @"rpc-persist-pns-region-1": rpcPersistPnsRegion1,
+            @"x-tt-store-region": ttStoreRegion,
+            @"x-tt-store-region-src": ttStoreRegionSrc,
+            @"rpc-persist-pyxis-policy-v-tnc": rpcPersistPyxisPolicyVTnc,
+            @"x-ss-dp": ssDp,
+            @"x-tt-trace-id": ttTraceId,
+            @"accept-encoding": acceptEncoding
+        },
+        @"raw_x26": raw,
+        @"raw_length": @(raw.length)
+    };
+
+    @synchronized(capturedData) {
+        [capturedData addObject:item];
+    }
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (floatingButton) {
+            [floatingButton setTitle:[NSString stringWithFormat:@"📡 %d", captureCount] forState:UIControlStateNormal];
+        }
+    });
+}
+
+// X26 register scanner timer callback
+static void scanX26Register() {
+    @autoreleasepool {
+        void *x26_ptr = NULL;
+        __asm__ volatile("mov %0, x26" : "=r"(x26_ptr));
+
+        if (!x26_ptr) return;
+
+        @try {
+            const char *data = (const char *)x26_ptr;
+            NSString *raw = [[NSString alloc] initWithBytes:data length:8192 encoding:NSUTF8StringEncoding];
+            if (raw) {
+                processX26Data(raw);
+            }
+        } @catch (NSException *e) {
+            // Silently ignore - x26 might point to invalid memory
+        }
+    }
+}
+
+// Start X26 scanner timer
+static void startX26Scanner() {
+    if (x26Timer) return;
+
+    dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
+    x26Timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
+
+    // Scan every 100ms
+    dispatch_source_set_timer(x26Timer, DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC, 50 * NSEC_PER_MSEC);
+
+    dispatch_source_set_event_handler(x26Timer, ^{
+        scanX26Register();
+    });
+
+    dispatch_resume(x26Timer);
+    addDebugLog(@"X26 scanner started (100ms interval)");
+}
+
+// ==================== memcmp Hook (Backup) ====================
 
 // Original memcmp
 static int (*original_memcmp)(const void *, const void *, size_t);
@@ -546,20 +703,26 @@ __attribute__((unused)) static void handlePan(UIPanGestureRecognizer *gesture) {
     @autoreleasepool {
         capturedData = [NSMutableArray new];
         debugLogs = [NSMutableArray new];
+        processedSignatures = [NSMutableSet new];
 
-        addDebugLog(@"dylib loaded - multi-hook mode for A10 compatibility");
+        addDebugLog(@"dylib loaded - X26 scanner mode for A10 compatibility");
 
-        // Hook memcmp
+        // Hook memcmp (backup method)
         MSHookFunction((void *)memcmp, (void *)hooked_memcmp, (void **)&original_memcmp);
-        addDebugLog(@"memcmp hooked");
+        addDebugLog(@"memcmp hooked (backup)");
 
-        // Hook bcmp for A10 compatibility
+        // Hook bcmp (backup method)
         MSHookFunction((void *)bcmp, (void *)hooked_bcmp, (void **)&original_bcmp);
-        addDebugLog(@"bcmp hooked");
+        addDebugLog(@"bcmp hooked (backup)");
 
-        // Hook strcmp for debugging
+        // Hook strcmp (backup method)
         MSHookFunction((void *)strcmp, (void *)hooked_strcmp, (void **)&original_strcmp);
-        addDebugLog(@"strcmp hooked");
+        addDebugLog(@"strcmp hooked (backup)");
+
+        // Start X26 scanner timer (primary method)
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            startX26Scanner();
+        });
 
         // Start HTTP server
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
