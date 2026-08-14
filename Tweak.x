@@ -512,6 +512,41 @@ static void closeDataWindow() {
 
 %hook NSMutableURLRequest
 
+- (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
+    %orig;
+
+    NSURL *url = [self URL];
+    if (url) {
+        NSString *urlStr = [url absoluteString];
+        if ([urlStr containsString:@"profile/self/v1"]) {
+            // 更新 pendingRequests 中的请求头
+            if (!pendingRequests) {
+                pendingRequests = [NSMutableDictionary new];
+            }
+
+            NSString *threadId = [NSString stringWithFormat:@"%p", [NSThread currentThread]];
+            NSMutableDictionary *pending = pendingRequests[threadId];
+
+            if (!pending) {
+                pending = [NSMutableDictionary new];
+                pending[@"url"] = urlStr;
+                pending[@"headers"] = [NSMutableDictionary new];
+                pending[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
+                pendingRequests[threadId] = pending;
+            }
+
+            NSMutableDictionary *headers = pending[@"headers"];
+            if (!headers) {
+                headers = [NSMutableDictionary new];
+                pending[@"headers"] = headers;
+            }
+            headers[field] = value;
+
+            NSLog(@"[TKCapture] → Header set: %@ = %@", field, value);
+        }
+    }
+}
+
 - (void)setHTTPBody:(NSData *)body {
     %orig;
 
