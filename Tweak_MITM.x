@@ -1,6 +1,10 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <substrate.h>
+#import <sys/socket.h>
+#import <netinet/in.h>
+#import <arpa/inet.h>
+#import <unistd.h>
 
 // ==================== 悬浮窗 ====================
 
@@ -44,10 +48,25 @@ static FloatingButton *floatingButton = nil;
 }
 
 - (void)show {
-    UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
+    UIWindow *keyWindow = nil;
+
+    // iOS 13+ 兼容
+    if (@available(iOS 13.0, *)) {
+        NSSet *scenes = [UIApplication sharedApplication].connectedScenes;
+        for (UIWindowScene *scene in scenes) {
+            if (scene.activationState == UISceneActivationStateForegroundActive) {
+                keyWindow = scene.windows.firstObject;
+                break;
+            }
+        }
+    }
+
     if (!keyWindow) {
         keyWindow = [UIApplication sharedApplication].windows.firstObject;
     }
+
+    if (!keyWindow) return;
+
     [keyWindow addSubview:self];
     [keyWindow bringSubviewToFront:self];
 }
