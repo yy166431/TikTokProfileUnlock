@@ -6,6 +6,7 @@
 #import <arpa/inet.h>
 #import <unistd.h>
 #import <ifaddrs.h>
+#import <netdb.h>
 
 // ==================== 悬浮窗 ====================
 
@@ -340,11 +341,74 @@ static MITMProxy *proxy = nil;
 
         self.captured = YES;
         [[FloatingButton sharedButton] updateStatus:@"✅ 已捕获\nprofile/self"];
+
+        // 转发到真实服务器
+        [self forwardRequest:buf length:n toClient:client];
+    } else {
+        // 其他请求直接透明转发
+        [self forwardRequest:buf length:n toClient:client];
+    }
+}
+
+- (void)forwardRequest:(const char *)request length:(ssize_t)len toClient:(int)client {
+    // 解析 Host 头
+    NSString *req = [NSString stringWithUTF8String:request];
+    NSString *host = nil;
+    int port = 443;
+
+    NSArray *lines = [req componentsSeparatedByString:@"\r\n"];
+    for (NSString *line in lines) {
+        if ([line hasPrefix:@"Host: "]) {
+            host = [line substringFromIndex:6];
+            break;
+        }
     }
 
-    // 返回简单响应（实际应该转发）
-    const char *resp = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
-    send(client, resp, strlen(resp), 0);
+    if (!host) {
+        close(client);
+        return;
+    }
+
+    // 连接到真实服务器
+    int serverSock = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverSock < 0) {
+        close(client);
+        return;
+    }
+
+    struct sockaddr_in serverAddr;
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(port);
+
+    // 解析 IP（简化版，实际应该用 getaddrinfo）
+    const char *hostCStr = [host UTF8String];
+    struct hostent *he = gethostbyname(hostCStr);
+    if (!he) {
+        close(serverSock);
+        close(client);
+        return;
+    }
+
+    memcpy(&serverAddr.sin_addr, he->h_addr_list[0], he->h_length);
+
+    // 连接
+    if (connect(serverSock, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0) {
+        close(serverSock);
+        close(client);
+        return;
+    }
+
+    // 转发请求
+    send(serverSock, request, len, 0);
+
+    // 接收响应并转发回客户端
+    char respBuf[16384];
+    ssize_t respLen;
+    while ((respLen = recv(serverSock, respBuf, sizeof(respBuf), 0)) > 0) {
+        send(client, respBuf, respLen, 0);
+    }
+
+    close(serverSock);
     close(client);
 }
 
