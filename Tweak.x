@@ -57,7 +57,7 @@ static NSString* extractHeader(NSString *raw, NSString *key) {
     }
 
     // Also check for \r\n\r\n (end of headers)
-    NSRange doubleNewline = [raw rangeOfString:@"\r\n\r\n" range:NSMakeRange(start, raw.length - start)];
+    NSRange doubleNewline = [raw rangeOfString:@"\r\n\r\n" options:0 range:NSMakeRange(start, raw.length - start)];
     if (doubleNewline.location != NSNotFound && doubleNewline.location < minEnd) {
         minEnd = doubleNewline.location;
     }
