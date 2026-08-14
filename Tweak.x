@@ -65,12 +65,27 @@ static NSString* generateHTML() {
                 [html appendFormat:@"<span class='label'>Request Headers:</span><pre class='json'>%@</pre>", jsonStr];
             }
         }
+        if (item[@"headers"]) {
+            NSData *jsonData = [NSJSONSerialization dataWithJSONObject:item[@"headers"] options:NSJSONWritingPrettyPrinted error:nil];
+            if (jsonData) {
+                NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+                [html appendFormat:@"<span class='label'>Response Headers:</span><pre class='json'>%@</pre>", jsonStr];
+            }
+        }
         if (item[@"response_body"]) {
             NSString *resp = item[@"response_body"];
             if ([resp length] > 2000) {
                 [html appendFormat:@"<span class='label'>Response Body:</span><pre class='json'>%@...</pre>", [resp substringToIndex:2000]];
             } else {
                 [html appendFormat:@"<span class='label'>Response Body:</span><pre class='json'>%@</pre>", resp];
+            }
+        }
+        if (item[@"response"]) {
+            NSString *resp = item[@"response"];
+            if ([resp length] > 2000) {
+                [html appendFormat:@"<span class='label'>Response JSON:</span><pre class='json'>%@...</pre>", [resp substringToIndex:2000]];
+            } else {
+                [html appendFormat:@"<span class='label'>Response JSON:</span><pre class='json'>%@</pre>", resp];
             }
         }
         [html appendString:@"</div>"];
@@ -315,28 +330,52 @@ static void closeDataWindow() {
 + (id)JSONObjectWithData:(NSData *)data options:(NSJSONReadingOptions)opt error:(NSError **)error {
     id result = %orig;
 
-    if (result && data.length > 1000 && data.length < 100000) {
+    if (result && data.length > 100) {
         @try {
             NSString *jsonStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
 
-            if (jsonStr && [jsonStr containsString:@"author_stats"]) {
-                captureCount++;
+            if (jsonStr) {
+                // 检查是否有最近的 profile/self/v1 捕获记录（2秒内）
+                NSDictionary *lastCapture = pendingRequests[@"last_profile_capture"];
+                if (lastCapture) {
+                    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+                    NSTimeInterval captureTime = [lastCapture[@"timestamp"] doubleValue];
 
-                // 获取调用栈找 URL
-                NSArray *callStack = [NSThread callStackSymbols];
-                NSString *stackInfo = [callStack componentsJoinedByString:@"\n"];
+                    // 如果在 2 秒内，且 JSON 包含用户数据特征
+                    if (now - captureTime < 2.0 && ([jsonStr containsString:@"user"] || [jsonStr containsString:@"data"])) {
+                        NSNumber *captureId = lastCapture[@"id"];
 
-                NSMutableDictionary *capture = [NSMutableDictionary new];
-                capture[@"id"] = @(captureCount);
-                capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
-                capture[@"type"] = @"response_json";
-                capture[@"response"] = jsonStr;
-                capture[@"stack"] = stackInfo;
+                        // 找到对应的 capture 记录并追加响应体
+                        for (NSMutableDictionary *item in capturedData) {
+                            if ([item[@"id"] isEqual:captureId]) {
+                                item[@"response_body"] = jsonStr;
 
-                [capturedData addObject:capture];
+                                NSLog(@"[TKCapture] ✓ Linked response body to capture #%@, size: %lu bytes",
+                                    captureId, (unsigned long)data.length);
 
-                NSLog(@"[TKCapture] ★★★ JSON #%d (size: %lu)",
-                    captureCount, (unsigned long)data.length);
+                                // 清除标记，避免重复关联
+                                [pendingRequests removeObjectForKey:@"last_profile_capture"];
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // 兼容旧的 author_stats 捕获
+                if ([jsonStr containsString:@"author_stats"]) {
+                    captureCount++;
+
+                    NSMutableDictionary *capture = [NSMutableDictionary new];
+                    capture[@"id"] = @(captureCount);
+                    capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
+                    capture[@"type"] = @"response_json";
+                    capture[@"response"] = jsonStr;
+
+                    [capturedData addObject:capture];
+
+                    NSLog(@"[TKCapture] ★★★ JSON #%d (size: %lu)",
+                        captureCount, (unsigned long)data.length);
+                }
             }
         } @catch (NSException *e) {}
     }
@@ -510,11 +549,51 @@ static void closeDataWindow() {
             NSMutableDictionary *capture = [NSMutableDictionary new];
             capture[@"id"] = @(captureCount);
             capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
-            capture[@"type"] = @"response_headers";
+            capture[@"type"] = @"response_complete";
             capture[@"url"] = urlStr;
-            capture[@"headers"] = headers ?: @{};
+            capture[@"response_headers"] = headers ?: @{};
+
+            // 尝试获取请求头：遍历对象的所有 ivar 查找 request 对象
+            @try {
+                unsigned int ivarCount = 0;
+                Ivar *ivars = class_copyIvarList([self class], &ivarCount);
+
+                for (unsigned int i = 0; i < ivarCount; i++) {
+                    Ivar ivar = ivars[i];
+                    const char *ivarName = ivar_getName(ivar);
+                    NSString *name = [NSString stringWithUTF8String:ivarName];
+
+                    // 查找名字包含 request 的属性
+                    if ([name.lowercaseString containsString:@"request"]) {
+                        id value = object_getIvar(self, ivar);
+
+                        // 如果是 NSURLRequest 类型
+                        if ([value isKindOfClass:[NSURLRequest class]]) {
+                            NSURLRequest *request = (NSURLRequest *)value;
+                            capture[@"request_headers"] = [request allHTTPHeaderFields] ?: @{};
+                            capture[@"method"] = [request HTTPMethod] ?: @"GET";
+                            NSLog(@"[TKCapture] ✓ Found request in ivar: %@", name);
+                            break;
+                        }
+                    }
+                }
+
+                if (ivars) free(ivars);
+            } @catch (NSException *e) {
+                NSLog(@"[TKCapture] Exception while finding request: %@", e);
+            }
 
             [capturedData addObject:capture];
+
+            // 保存到 pendingRequests 用于关联响应体
+            if (!pendingRequests) {
+                pendingRequests = [NSMutableDictionary new];
+            }
+            pendingRequests[@"last_profile_capture"] = @{
+                @"id": @(captureCount),
+                @"timestamp": capture[@"timestamp"],
+                @"url": urlStr
+            };
 
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (floatingButton) {
@@ -523,7 +602,7 @@ static void closeDataWindow() {
             });
 
             NSLog(@"[TKCapture] ★★★ Response #%d: %@", captureCount, urlStr);
-            NSLog(@"[TKCapture] Headers: %@", headers);
+            NSLog(@"[TKCapture] Response Headers: %@", headers);
         }
     }
 
