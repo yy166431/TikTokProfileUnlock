@@ -22,45 +22,6 @@ static UIWindow *dataWindow = nil;
 // Original memcmp
 static int (*original_memcmp)(const void *, const void *, size_t);
 
-// Extract headers from x26 register data - improved to handle null bytes
-static NSString* extractValue(NSString *raw, NSString *key, int maxLen) {
-    NSRange range = [raw rangeOfString:key];
-    if (range.location == NSNotFound) return @"";
-
-    NSInteger start = range.location + key.length;
-    if (start >= raw.length) return @"";
-
-    // Skip colon and spaces if present
-    while (start < raw.length && ([raw characterAtIndex:start] == ':' || [raw characterAtIndex:start] == ' ')) {
-        start++;
-    }
-    if (start >= raw.length) return @"";
-
-    NSString *sub = [raw substringFromIndex:start];
-
-    // Find next header marker, special char, or null byte
-    NSArray *markers = @[@"x-gorgon", @"x-khronos", @"x-ladon", @"x-argus", @"x-common", @"\r\n", @"\r", @"\n", @";", @" HTTP/"];
-    NSInteger minPos = maxLen < sub.length ? maxLen : sub.length;
-
-    for (NSString *m in markers) {
-        NSRange r = [sub rangeOfString:m];
-        if (r.location != NSNotFound && r.location > 0 && r.location < minPos) {
-            minPos = r.location;
-        }
-    }
-
-    // Check for null bytes
-    for (NSInteger i = 0; i < minPos && i < sub.length; i++) {
-        if ([sub characterAtIndex:i] == 0) {
-            minPos = i;
-            break;
-        }
-    }
-
-    NSString *result = [sub substringToIndex:minPos];
-    return [result stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-}
-
 // Hooked memcmp - capture signatures from x26
 static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
     int result = original_memcmp(s1, s2, n);
