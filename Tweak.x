@@ -870,6 +870,40 @@ static void installAEADHooks() {
 %ctor {
     capturedRequests = [NSMutableArray array];
     installAEADHooks();   // 尽早挂, 抓全流量
+
+    // 枚举所有 User/Profile 类
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_global_queue(0,0), ^{
+        NSMutableArray *userClasses = [NSMutableArray array];
+        NSMutableArray *profileClasses = [NSMutableArray array];
+
+        unsigned int count = 0;
+        Class *classes = objc_copyClassList(&count);
+        for (unsigned int i = 0; i < count; i++) {
+            const char *name = class_getName(classes[i]);
+            if (!name) continue;
+            NSString *className = [NSString stringWithUTF8String:name];
+            NSString *lower = [className lowercaseString];
+
+            if ([lower containsString:@"user"] && ![lower containsString:@"default"]) {
+                [userClasses addObject:className];
+            }
+            if ([lower containsString:@"profile"]) {
+                [profileClasses addObject:className];
+            }
+        }
+        free(classes);
+
+        HLog(@"========== 找到 %lu 个 User 类 ==========", (unsigned long)userClasses.count);
+        for (NSString *cls in [userClasses subarrayWithRange:NSMakeRange(0, MIN(50, userClasses.count))]) {
+            HLog(@"  %@", cls);
+        }
+
+        HLog(@"========== 找到 %lu 个 Profile 类 ==========", (unsigned long)profileClasses.count);
+        for (NSString *cls in [profileClasses subarrayWithRange:NSMakeRange(0, MIN(50, profileClasses.count))]) {
+            HLog(@"  %@", cls);
+        }
+    });
+
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         createFloatingButton();
         startHTTPServer();
