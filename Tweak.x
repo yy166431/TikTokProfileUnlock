@@ -57,6 +57,11 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
             return result;
         }
 
+        // Only capture profile/self requests
+        if ([raw rangeOfString:@"profile/self"].location == NSNotFound) {
+            return result;
+        }
+
         captureCount++;
 
         // Parse headers and URL from raw data - improved parsing
@@ -359,24 +364,30 @@ static void createFloatingButton() {
     if (floatingButton) return;
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *keyWindow = nil;
-        NSArray *windows = [UIApplication sharedApplication].windows;
-        for (UIWindow *window in windows) {
-            if (window.isKeyWindow) {
-                keyWindow = window;
+        // Find or create top-level window
+        UIWindow *targetWindow = nil;
+        for (UIWindow *window in [UIApplication sharedApplication].windows) {
+            if (window.windowLevel == UIWindowLevelNormal && window.isKeyWindow) {
+                targetWindow = window;
                 break;
             }
         }
-        if (!keyWindow && windows.count > 0) {
-            keyWindow = windows.firstObject;
+        if (!targetWindow) {
+            for (UIWindow *window in [UIApplication sharedApplication].windows) {
+                if (window.windowLevel == UIWindowLevelNormal) {
+                    targetWindow = window;
+                    break;
+                }
+            }
         }
-        if (!keyWindow) return;
+        if (!targetWindow) return;
 
         floatingButton = [UIButton buttonWithType:UIButtonTypeSystem];
         floatingButton.frame = CGRectMake([UIScreen mainScreen].bounds.size.width - 80, 100, 70, 40);
         floatingButton.backgroundColor = [UIColor colorWithRed:0 green:0.8 blue:0 alpha:0.9];
         floatingButton.layer.cornerRadius = 20;
-        [floatingButton setTitle:@"📡 0" forState:UIControlStateNormal];
+        floatingButton.layer.zPosition = 9999; // Force to front
+        [floatingButton setTitle:[NSString stringWithFormat:@"📡 %d", captureCount] forState:UIControlStateNormal];
         [floatingButton setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
         floatingButton.titleLabel.font = [UIFont boldSystemFontOfSize:16];
         [floatingButton addTarget:nil action:@selector(showDataWindow) forControlEvents:UIControlEventTouchUpInside];
@@ -384,9 +395,22 @@ static void createFloatingButton() {
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:nil action:@selector(handlePan:)];
         [floatingButton addGestureRecognizer:pan];
 
-        [keyWindow addSubview:floatingButton];
+        [targetWindow addSubview:floatingButton];
 
-        NSLog(@"[TikTokHeaders] Floating button created");
+        NSLog(@"[TikTokHeaders] Floating button created on window: %@", targetWindow);
+
+        // Keep updating button every 2 seconds to ensure visibility
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            while (YES) {
+                sleep(2);
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (floatingButton && floatingButton.superview) {
+                        [floatingButton setTitle:[NSString stringWithFormat:@"📡 %d", captureCount] forState:UIControlStateNormal];
+                        [floatingButton.superview bringSubviewToFront:floatingButton];
+                    }
+                });
+            }
+        });
     });
 }
 
