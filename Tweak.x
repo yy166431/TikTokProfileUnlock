@@ -30,6 +30,10 @@ static void addDebugLog(NSString *message) {
     NSLog(@"[TikTokHeaders] %@", message);
 }
 
+// ==================== Forward Declarations ====================
+
+static NSString* extractHeader(NSString *raw, NSString *key);
+
 // ==================== X26 Register Scanner ====================
 
 // Process captured x26 data
@@ -55,7 +59,7 @@ static void processX26Data(NSString *raw) {
         }
     }
 
-    addDebugLog([NSString stringWithFormat:@"x26 scanner captured! gorgon=%.20@...", gorgon]);
+    addDebugLog([NSString stringWithFormat:@"x26 scanner captured! gorgon=%@...", [gorgon substringToIndex:MIN(20, gorgon.length)]]);
 
     captureCount++;
 
