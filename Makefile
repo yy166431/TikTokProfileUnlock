@@ -14,8 +14,14 @@ TikTokMITMProxy_LIBRARIES = substrate
 include $(THEOS_MAKE_PATH)/tweak.mk
 
 after-stage::
-	@echo "==== Dylib only build ===="
+	@echo "==== Preparing dylib for TrollStore ===="
 	@mkdir -p $(THEOS_STAGING_DIR)/TrollStore
-	@cp $(THEOS_STAGING_DIR)/Library/MobileSubstrate/DynamicLibraries/TikTokCapture.dylib $(THEOS_STAGING_DIR)/TrollStore/
-	@cp $(THEOS_STAGING_DIR)/Library/MobileSubstrate/DynamicLibraries/TikTokCapture.plist $(THEOS_STAGING_DIR)/TrollStore/
-	@echo "✓ Dylib ready in .theos/_/TrollStore/"
+	@cp $(THEOS_STAGING_DIR)/Library/MobileSubstrate/DynamicLibraries/TikTokMITMProxy.dylib $(THEOS_STAGING_DIR)/TrollStore/
+	@cp $(THEOS_STAGING_DIR)/Library/MobileSubstrate/DynamicLibraries/TikTokMITMProxy.plist $(THEOS_STAGING_DIR)/TrollStore/
+	@echo "✓ Dylib ready: .theos/_/TrollStore/TikTokMITMProxy.dylib"
+	@echo "✓ Plist ready: .theos/_/TrollStore/TikTokMITMProxy.plist"
+	@echo ""
+	@echo "📦 Usage:"
+	@echo "  1. DEB install: Install the .deb with TrollStore (auto-inject to TikTok)"
+	@echo "  2. Manual inject: Use TrollStore Injector with the .dylib file"
+
