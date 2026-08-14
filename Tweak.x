@@ -109,6 +109,37 @@ static void setupLocalServer() {
 
 // ==================== 悬浮窗 ====================
 
+@interface UIButton (TKCapture)
+- (void)onButtonTap;
+- (void)handlePan:(UIPanGestureRecognizer *)gesture;
+@end
+
+@implementation UIButton (TKCapture)
+
+- (void)onButtonTap {
+    showDataWindow();
+}
+
+- (void)handlePan:(UIPanGestureRecognizer *)gesture {
+    UIView *button = gesture.view;
+    CGPoint translation = [gesture translationInView:button.superview];
+
+    button.center = CGPointMake(button.center.x + translation.x, button.center.y + translation.y);
+    [gesture setTranslation:CGPointZero inView:button.superview];
+
+    if (gesture.state == UIGestureRecognizerStateEnded) {
+        // 自动吸边
+        CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
+        CGFloat newX = button.center.x < screenWidth / 2 ? 30 : screenWidth - 30;
+
+        [UIView animateWithDuration:0.3 animations:^{
+            button.center = CGPointMake(newX, button.center.y);
+        }];
+    }
+}
+
+@end
+
 static void createFloatingButton() {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (floatingButton) return;
@@ -151,32 +182,7 @@ static void createFloatingButton() {
     });
 }
 
-// 按钮点击
-%new
-- (void)onButtonTap {
-    // 显示数据窗口
-    showDataWindow();
-}
-
-// 拖动手势
-%new
-- (void)handlePan:(UIPanGestureRecognizer *)gesture {
-    UIView *button = gesture.view;
-    CGPoint translation = [gesture translationInView:button.superview];
-
-    button.center = CGPointMake(button.center.x + translation.x, button.center.y + translation.y);
-    [gesture setTranslation:CGPointZero inView:button.superview];
-
-    if (gesture.state == UIGestureRecognizerStateEnded) {
-        // 自动吸边
-        CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
-        CGFloat newX = button.center.x < screenWidth / 2 ? 30 : screenWidth - 30;
-
-        [UIView animateWithDuration:0.3 animations:^{
-            button.center = CGPointMake(newX, button.center.y);
-        }];
-    }
-}
+static UIWindow *dataWindow = nil;
 
 static void showDataWindow() {
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -249,8 +255,7 @@ static void showDataWindow() {
     });
 }
 
-%new
-+ (void)closeDataWindow {
+static void closeDataWindow() {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (dataWindow) {
             [dataWindow removeFromSuperview];
