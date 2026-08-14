@@ -13,6 +13,10 @@ static int captureCount = 0;
 static UIButton *floatingButton = nil;
 static UIWindow *dataWindow = nil;
 
+// 前置声明
+static void showDataWindow();
+static void closeDataWindow();
+
 // ==================== 简易 HTTP 服务器 ====================
 
 static NSString* generateHTML() {
@@ -181,8 +185,6 @@ static void createFloatingButton() {
         NSLog(@"[TKCapture] ✓ Floating button created");
     });
 }
-
-static UIWindow *dataWindow = nil;
 
 static void showDataWindow() {
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -483,9 +485,16 @@ static void closeDataWindow() {
 
 // ==================== Hook TTHttpTask ====================
 
-%hook TTHttpTask
+%hook NSObject
 
 - (void)start {
+    %orig;
+
+    // 只 hook TTHttpTask 类的实例
+    if (![NSStringFromClass([self class]) containsString:@"TTHttpTask"]) {
+        return;
+    }
+
     @try {
         if ([self respondsToSelector:@selector(request)]) {
             id request = [self performSelector:@selector(request)];
@@ -521,8 +530,6 @@ static void closeDataWindow() {
     } @catch (NSException *e) {
         NSLog(@"[TKCapture] Exception in TTHttpTask hook: %@", e);
     }
-
-    %orig;
 }
 
 %end
