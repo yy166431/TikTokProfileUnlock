@@ -59,11 +59,77 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
 
         captureCount++;
 
-        // Store raw x26 dump for analysis
+        // Parse headers and URL from raw data
+        NSString *argus = @"", *gorgon = @"", *khronos = @"", *ladon = @"", *query = @"";
+
+        // Extract x-gorgon
+        NSRange gorgonRange = [raw rangeOfString:@"x-gorgon"];
+        if (gorgonRange.location != NSNotFound) {
+            NSInteger start = gorgonRange.location + 8; // skip "x-gorgon"
+            NSString *sub = [raw substringFromIndex:start];
+            NSRange nextHeader = [sub rangeOfString:@"x-"];
+            if (nextHeader.location != NSNotFound) {
+                gorgon = [[sub substringToIndex:nextHeader.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            }
+        }
+
+        // Extract x-khronos
+        NSRange khronosRange = [raw rangeOfString:@"x-khronos"];
+        if (khronosRange.location != NSNotFound) {
+            NSInteger start = khronosRange.location + 9;
+            NSString *sub = [raw substringFromIndex:start];
+            NSRange nextHeader = [sub rangeOfString:@"x-"];
+            if (nextHeader.location != NSNotFound) {
+                khronos = [[sub substringToIndex:nextHeader.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            }
+        }
+
+        // Extract x-ladon
+        NSRange ladonRange = [raw rangeOfString:@"x-ladon"];
+        if (ladonRange.location != NSNotFound) {
+            NSInteger start = ladonRange.location + 7;
+            NSString *sub = [raw substringFromIndex:start];
+            NSRange nextHeader = [sub rangeOfString:@"x-"];
+            if (nextHeader.location != NSNotFound) {
+                ladon = [[sub substringToIndex:nextHeader.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            }
+        }
+
+        // Extract x-argus
+        NSRange argusRange = [raw rangeOfString:@"x-argus"];
+        if (argusRange.location != NSNotFound) {
+            NSInteger start = argusRange.location + 7;
+            NSString *sub = [raw substringFromIndex:start];
+            NSRange nextHeader = [sub rangeOfString:@"x-"];
+            if (nextHeader.location != NSNotFound) {
+                argus = [[sub substringToIndex:nextHeader.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            }
+        }
+
+        // Extract query string
+        NSRange musicalRange = [raw rangeOfString:@"musical_ly"];
+        if (musicalRange.location != NSNotFound) {
+            NSString *qStr = [raw substringFromIndex:musicalRange.location];
+            NSRange contentLength = [qStr rangeOfString:@"content-length"];
+            if (contentLength.location != NSNotFound) {
+                query = [[qStr substringToIndex:contentLength.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            }
+        }
+
+        NSString *fullURL = [NSString stringWithFormat:@"https://api-t.tiktokv.com/tiktok/user/profile/self/v1?%@", query];
+
+        // Store captured data with parsed fields
         NSDictionary *item = @{
             @"id": @(captureCount),
             @"timestamp": [[NSDate date] description],
-            @"raw_x26": raw,  // Store complete raw data
+            @"url": fullURL,
+            @"headers": @{
+                @"x-argus": argus,
+                @"x-gorgon": gorgon,
+                @"x-khronos": khronos,
+                @"x-ladon": ladon
+            },
+            @"raw_x26": raw,
             @"raw_length": @(raw.length)
         };
 
@@ -98,14 +164,26 @@ static NSString* generateHTML() {
     for (NSDictionary *item in [capturedData reverseObjectEnumerator]) {
         [html appendString:@"<div class='item'>"];
         [html appendFormat:@"<span class='label'>#%@</span> - %@<br>", item[@"id"], item[@"timestamp"]];
+        [html appendFormat:@"<span class='label'>URL:</span><br><span class='url'>%@</span><br><br>", item[@"url"]];
 
-        // Display raw x26 dump
+        NSDictionary *headers = item[@"headers"];
+        [html appendFormat:@"<div class='header'><span class='label'>x-argus:</span> %@</div>", headers[@"x-argus"]];
+        [html appendFormat:@"<div class='header'><span class='label'>x-gorgon:</span> %@</div>", headers[@"x-gorgon"]];
+        [html appendFormat:@"<div class='header'><span class='label'>x-khronos:</span> %@</div>", headers[@"x-khronos"]];
+
+        NSString *ladon = headers[@"x-ladon"];
+        if (ladon.length > 100) {
+            [html appendFormat:@"<div class='header'><span class='label'>x-ladon:</span> %@...</div>", [ladon substringToIndex:100]];
+        } else {
+            [html appendFormat:@"<div class='header'><span class='label'>x-ladon:</span> %@</div>", ladon];
+        }
+
+        // Show raw dump in details tag
         NSString *rawData = item[@"raw_x26"];
         if (rawData) {
-            [html appendFormat:@"<span class='label'>Raw Length:</span> %@<br><br>", item[@"raw_length"]];
-            [html appendString:@"<div class='header'><span class='label'>Raw x26 Data:</span><br>"];
-            [html appendFormat:@"<pre style='color:#0f0;font-size:9px;white-space:pre-wrap;word-break:break-all'>%@</pre>", rawData];
-            [html appendString:@"</div>"];
+            [html appendString:@"<details style='margin-top:10px'><summary style='cursor:pointer;color:#ff0'>Show Raw x26 Dump</summary>"];
+            [html appendFormat:@"<pre style='color:#0f0;font-size:9px;white-space:pre-wrap;word-break:break-all;margin-top:5px'>%@</pre>", rawData];
+            [html appendString:@"</details>"];
         }
 
         [html appendString:@"</div>"];
