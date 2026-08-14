@@ -98,72 +98,12 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
 
         captureCount++;
 
-        // Log raw data for debugging
-        NSLog(@"[TikTokHeaders] Raw x26 data (first 500 chars): %@",
-              [raw substringToIndex:MIN(500, raw.length)]);
-
-        // Extract signature headers with larger buffer sizes
-        NSString *argus = extractValue(raw, @"x-argus", 500);
-        NSString *gorgon = extractValue(raw, @"x-gorgon", 100);
-        NSString *khronos = extractValue(raw, @"x-khronos", 20);
-        NSString *ladon = extractValue(raw, @"x-ladon", 2000);
-
-        // Also try alternative argus patterns
-        if (argus.length == 0) {
-            argus = extractValue(raw, @"X-Argus", 500);
-        }
-        if (argus.length == 0) {
-            argus = extractValue(raw, @"argus", 500);
-        }
-
-        NSLog(@"[TikTokHeaders] Extracted - argus=%@, gorgon=%@, khronos=%@, ladon_len=%lu",
-              argus.length > 0 ? [argus substringToIndex:MIN(20, argus.length)] : @"(empty)",
-              gorgon.length > 0 ? [gorgon substringToIndex:MIN(20, gorgon.length)] : @"(empty)",
-              khronos, (unsigned long)ladon.length);
-
-        // Extract complete query string - find musical_ly and read until non-URL character
-        NSString *query = @"";
-        NSRange musicalRange = [raw rangeOfString:@"musical_ly"];
-        if (musicalRange.location != NSNotFound) {
-            NSString *qStr = [raw substringFromIndex:musicalRange.location];
-            NSInteger endPos = 0;
-
-            // Scan character by character for valid URL chars
-            for (NSInteger i = 0; i < qStr.length && i < 3000; i++) {
-                unichar ch = [qStr characterAtIndex:i];
-                // Valid URL characters: a-z A-Z 0-9 - _ . ~ : / ? # [ ] @ ! $ & ' ( ) * + , ; = %
-                if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
-                    (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' ||
-                    ch == '.' || ch == '~' || ch == ':' || ch == '/' ||
-                    ch == '?' || ch == '#' || ch == '[' || ch == ']' ||
-                    ch == '@' || ch == '!' || ch == '$' || ch == '&' ||
-                    ch == '\'' || ch == '(' || ch == ')' || ch == '*' ||
-                    ch == '+' || ch == ',' || ch == ';' || ch == '=' || ch == '%') {
-                    endPos = i + 1;
-                } else {
-                    break;
-                }
-            }
-
-            if (endPos > 0) {
-                query = [qStr substringToIndex:endPos];
-            }
-        }
-
-        // Build complete URL
-        NSString *fullURL = [NSString stringWithFormat:@"https://api-t.tiktokv.com/tiktok/user/profile/self/v1?%@", query];
-
-        // Store captured data
+        // Store raw x26 dump for analysis
         NSDictionary *item = @{
             @"id": @(captureCount),
             @"timestamp": [[NSDate date] description],
-            @"url": fullURL,
-            @"headers": @{
-                @"x-argus": argus,
-                @"x-gorgon": gorgon,
-                @"x-khronos": khronos,
-                @"x-ladon": ladon
-            }
+            @"raw_x26": raw,  // Store complete raw data
+            @"raw_length": @(raw.length)
         };
 
         [capturedData addObject:item];
@@ -199,18 +139,14 @@ static NSString* generateHTML() {
     for (NSDictionary *item in [capturedData reverseObjectEnumerator]) {
         [html appendString:@"<div class='item'>"];
         [html appendFormat:@"<span class='label'>#%@</span> - %@<br>", item[@"id"], item[@"timestamp"]];
-        [html appendFormat:@"<span class='label'>URL:</span><br><span class='url'>%@</span><br><br>", item[@"url"]];
 
-        NSDictionary *headers = item[@"headers"];
-        [html appendFormat:@"<div class='header'><span class='label'>x-argus:</span> %@</div>", headers[@"x-argus"]];
-        [html appendFormat:@"<div class='header'><span class='label'>x-gorgon:</span> %@</div>", headers[@"x-gorgon"]];
-        [html appendFormat:@"<div class='header'><span class='label'>x-khronos:</span> %@</div>", headers[@"x-khronos"]];
-
-        NSString *ladon = headers[@"x-ladon"];
-        if (ladon.length > 100) {
-            [html appendFormat:@"<div class='header'><span class='label'>x-ladon:</span> %@...</div>", [ladon substringToIndex:100]];
-        } else {
-            [html appendFormat:@"<div class='header'><span class='label'>x-ladon:</span> %@</div>", ladon];
+        // Display raw x26 dump
+        NSString *rawData = item[@"raw_x26"];
+        if (rawData) {
+            [html appendFormat:@"<span class='label'>Raw Length:</span> %@<br><br>", item[@"raw_length"]];
+            [html appendString:@"<div class='header'><span class='label'>Raw x26 Data:</span><br>"];
+            [html appendFormat:@"<pre style='color:#0f0;font-size:9px;white-space:pre-wrap;word-break:break-all'>%@</pre>", rawData];
+            [html appendString:@"</div>"];
         }
 
         [html appendString:@"</div>"];
