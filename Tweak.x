@@ -773,6 +773,99 @@ static void installAEADHooks() {
     sendLogToServer(@"info", s);
 }
 
+// ============================================
+// Model 层 Hook - 抓内存缓存的 profile 数据
+// ============================================
+
+%hook TTKUser
+- (id)initWithDictionary:(id)dict {
+    id ret = %orig;
+    @try {
+        if (ret) {
+            NSString *desc = [ret description];
+            if (desc && ([desc containsString:@"sec_uid"] || [desc containsString:@"follower"])) {
+                HLog(@"[TTKUser初始化★] %@", desc.length > 1000 ? [desc substringToIndex:1000] : desc);
+                recordCapture(@"[TTKUser对象★]", @"MODEL", desc, nil, nil);
+            }
+        }
+    } @catch (__unused NSException *e) {}
+    return ret;
+}
+
+- (NSString *)secUid {
+    NSString *ret = %orig;
+    if (ret && ret.length > 0) HLog(@"[TTKUser] secUid访问: %@", ret);
+    return ret;
+}
+
+- (NSNumber *)followerCount {
+    NSNumber *ret = %orig;
+    if (ret) HLog(@"[TTKUser] followerCount访问: %@", ret);
+    return ret;
+}
+%end
+
+%hook AWEUserModel
+- (id)initWithDictionary:(id)dict {
+    id ret = %orig;
+    @try {
+        if (ret) {
+            NSString *desc = [ret description];
+            if (desc && ([desc containsString:@"sec_uid"] || [desc containsString:@"follower"])) {
+                HLog(@"[AWEUserModel初始化★] %@", desc.length > 1000 ? [desc substringToIndex:1000] : desc);
+                recordCapture(@"[AWEUserModel对象★]", @"MODEL", desc, nil, nil);
+            }
+        }
+    } @catch (__unused NSException *e) {}
+    return ret;
+}
+%end
+
+// Hook JSON 反序列化 - 捕获所有 JSON 解析出的用户数据
+%hook NSJSONSerialization
++ (id)JSONObjectWithData:(NSData *)data options:(NSJSONReadingOptions)opt error:(NSError **)error {
+    id ret = %orig;
+    @try {
+        if (ret && [ret isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *dict = (NSDictionary *)ret;
+            // 检查是否包含用户资料字段
+            if (dict[@"sec_uid"] || dict[@"follower_count"] || dict[@"unique_id"] || dict[@"aweme_count"]) {
+                NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+                if (json && json.length > 0) {
+                    HLog(@"[JSON解析★] 用户数据 len=%lu", (unsigned long)json.length);
+                    recordCapture(@"[JSON解析★]", @"JSON",
+                                json.length > 2000 ? [json substringToIndex:2000] : json,
+                                nil, nil);
+                }
+            }
+        }
+    } @catch (__unused NSException *e) {}
+    return ret;
+}
+%end
+
+// Hook NSUserDefaults - 检查是否缓存在偏好设置
+%hook NSUserDefaults
+- (id)objectForKey:(NSString *)key {
+    id ret = %orig;
+    @try {
+        if (ret && key) {
+            NSString *lowerKey = [key lowercaseString];
+            if ([lowerKey containsString:@"user"] || [lowerKey containsString:@"profile"] ||
+                [lowerKey containsString:@"account"] || [lowerKey containsString:@"self"]) {
+                NSString *desc = [ret description];
+                if (desc && [desc containsString:@"sec_uid"]) {
+                    HLog(@"[NSUserDefaults★] key=%@ 包含用户数据", key);
+                    recordCapture([NSString stringWithFormat:@"[NSUserDefaults★] %@", key],
+                                @"CACHE", desc.length > 1000 ? [desc substringToIndex:1000] : desc, nil, nil);
+                }
+            }
+        }
+    } @catch (__unused NSException *e) {}
+    return ret;
+}
+%end
+
 // ============ 初始化 ============
 %ctor {
     capturedRequests = [NSMutableArray array];
@@ -780,7 +873,7 @@ static void installAEADHooks() {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         createFloatingButton();
         startHTTPServer();
-        HLog(@"✅ 抓包插件已加载, 端口%d", HTTP_PORT);
+        HLog(@"✅ 抓包插件已加载(含Model层), 端口%d", HTTP_PORT);
     });
     // 诊断: 每8秒上报一次AEAD计数, 判定业务流量到底走没走boringssl的AEAD
     static dispatch_source_t t = nil;
