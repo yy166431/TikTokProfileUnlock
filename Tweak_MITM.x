@@ -2,278 +2,235 @@
 #import <UIKit/UIKit.h>
 #import <substrate.h>
 
-// ==================== HTTP 代理服务器 ====================
+// ==================== 悬浮窗 ====================
 
-@interface MITMProxyServer : NSObject
-@property (nonatomic, strong) NSMutableArray *capturedRequests;
-@property (nonatomic, assign) uint16_t proxyPort;
-@property (nonatomic, assign) uint16_t webPort;
-+ (instancetype)sharedInstance;
-- (void)startProxy;
-- (void)startWebInterface;
-- (NSString *)generateHTML;
+@interface FloatingButton : UIButton
+@property (nonatomic, strong) UILabel *statusLabel;
++ (instancetype)sharedButton;
+- (void)show;
+- (void)updateStatus:(NSString *)status;
 @end
 
-static MITMProxyServer *proxyServer = nil;
+static FloatingButton *floatingButton = nil;
 
-@implementation MITMProxyServer
+@implementation FloatingButton
 
-+ (instancetype)sharedInstance {
++ (instancetype)sharedButton {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        proxyServer = [[self alloc] init];
+        floatingButton = [[self alloc] initWithFrame:CGRectMake(20, 100, 120, 80)];
+        [floatingButton setup];
     });
-    return proxyServer;
+    return floatingButton;
 }
 
-- (instancetype)init {
-    self = [super init];
-    if (self) {
-        self.capturedRequests = [NSMutableArray array];
-        self.proxyPort = 8899;  // 内部代理端口
-        self.webPort = 9999;    // Web 界面端口
+- (void)setup {
+    self.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.8];
+    self.layer.cornerRadius = 10;
+    self.layer.borderWidth = 2;
+    self.layer.borderColor = [UIColor greenColor].CGColor;
+
+    self.statusLabel = [[UILabel alloc] initWithFrame:self.bounds];
+    self.statusLabel.text = @"🎯 MITM\n等待中...";
+    self.statusLabel.textColor = [UIColor whiteColor];
+    self.statusLabel.font = [UIFont boldSystemFontOfSize:12];
+    self.statusLabel.textAlignment = NSTextAlignmentCenter;
+    self.statusLabel.numberOfLines = 0;
+    [self addSubview:self.statusLabel];
+
+    // 添加拖动手势
+    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+    [self addGestureRecognizer:pan];
+}
+
+- (void)show {
+    UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
+    if (!keyWindow) {
+        keyWindow = [UIApplication sharedApplication].windows.firstObject;
     }
-    return self;
+    [keyWindow addSubview:self];
+    [keyWindow bringSubviewToFront:self];
+}
+
+- (void)updateStatus:(NSString *)status {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.statusLabel.text = status;
+
+        // 成功时变绿
+        if ([status containsString:@"✅"]) {
+            self.layer.borderColor = [UIColor greenColor].CGColor;
+            self.backgroundColor = [[UIColor greenColor] colorWithAlphaComponent:0.3];
+        }
+    });
+}
+
+- (void)handlePan:(UIPanGestureRecognizer *)gesture {
+    if (gesture.state == UIGestureRecognizerStateChanged) {
+        CGPoint translation = [gesture translationInView:self.superview];
+        self.center = CGPointMake(self.center.x + translation.x, self.center.y + translation.y);
+        [gesture setTranslation:CGPointZero inView:self.superview];
+    }
+}
+
+@end
+
+// ==================== 代理服务器 ====================
+
+@interface MITMProxy : NSObject
+@property (nonatomic, assign) BOOL captured;
++ (instancetype)shared;
+- (void)startProxy;
+- (void)saveData:(NSString *)url headers:(NSDictionary *)headers body:(NSString *)body;
+@end
+
+static MITMProxy *proxy = nil;
+
+@implementation MITMProxy
+
++ (instancetype)shared {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        proxy = [[self alloc] init];
+    });
+    return proxy;
 }
 
 - (void)startProxy {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSLog(@"[MITM] Starting proxy server on port %d...", self.proxyPort);
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        NSLog(@"[MITM] 🚀 Starting proxy on port 8899...");
 
-        // 创建 socket 监听
-        int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
-        if (serverSocket < 0) {
-            NSLog(@"[MITM] Failed to create socket");
-            return;
-        }
-
+        int sock = socket(AF_INET, SOCK_STREAM, 0);
         int reuse = 1;
-        setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 
-        struct sockaddr_in serverAddr;
-        memset(&serverAddr, 0, sizeof(serverAddr));
-        serverAddr.sin_family = AF_INET;
-        serverAddr.sin_addr.s_addr = INADDR_ANY;
-        serverAddr.sin_port = htons(self.proxyPort);
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = INADDR_ANY;
+        addr.sin_port = htons(8899);
 
-        if (bind(serverSocket, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0) {
-            NSLog(@"[MITM] Failed to bind socket");
-            close(serverSocket);
+        if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+            NSLog(@"[MITM] ❌ Bind failed");
             return;
         }
 
-        if (listen(serverSocket, 10) < 0) {
-            NSLog(@"[MITM] Failed to listen");
-            close(serverSocket);
-            return;
-        }
+        listen(sock, 10);
+        NSLog(@"[MITM] ✅ Proxy listening on 0.0.0.0:8899");
 
-        NSLog(@"[MITM] Proxy server listening on 0.0.0.0:%d", self.proxyPort);
+        [[FloatingButton sharedButton] updateStatus:@"🎯 MITM\n代理启动"];
 
-        while (YES) {
+        while (!self.captured) {
             struct sockaddr_in clientAddr;
-            socklen_t clientLen = sizeof(clientAddr);
-            int clientSocket = accept(serverSocket, (struct sockaddr *)&clientAddr, &clientLen);
+            socklen_t len = sizeof(clientAddr);
+            int client = accept(sock, (struct sockaddr *)&clientAddr, &len);
 
-            if (clientSocket < 0) {
-                continue;
-            }
+            if (client < 0) continue;
 
-            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                [self handleClient:clientSocket];
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+                [self handleClient:client];
             });
         }
+
+        close(sock);
+        NSLog(@"[MITM] 🎉 Captured! Proxy stopped.");
     });
 }
 
-- (void)handleClient:(int)clientSocket {
-    char buffer[8192];
-    ssize_t bytesRead = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
+- (void)handleClient:(int)client {
+    char buf[16384];
+    ssize_t n = recv(client, buf, sizeof(buf) - 1, 0);
 
-    if (bytesRead <= 0) {
-        close(clientSocket);
+    if (n <= 0) {
+        close(client);
         return;
     }
 
-    buffer[bytesRead] = '\0';
-    NSString *requestStr = [NSString stringWithUTF8String:buffer];
-
-    // 解析 HTTP 请求
-    NSArray *lines = [requestStr componentsSeparatedByString:@"\r\n"];
-    if (lines.count == 0) {
-        close(clientSocket);
-        return;
-    }
-
-    NSString *requestLine = lines[0];
-    NSLog(@"[MITM] Request: %@", requestLine);
-
-    // 解析请求头
-    NSMutableDictionary *headers = [NSMutableDictionary dictionary];
-    NSString *body = @"";
-    BOOL inBody = NO;
-
-    for (NSUInteger i = 1; i < lines.count; i++) {
-        NSString *line = lines[i];
-
-        if (line.length == 0) {
-            inBody = YES;
-            continue;
-        }
-
-        if (inBody) {
-            body = [body stringByAppendingString:line];
-        } else {
-            NSArray *parts = [line componentsSeparatedByString:@": "];
-            if (parts.count >= 2) {
-                headers[parts[0]] = parts[1];
-            }
-        }
-    }
+    buf[n] = '\0';
+    NSString *req = [NSString stringWithUTF8String:buf];
 
     // 检查是否是 profile/self/v1
-    if ([requestLine containsString:@"profile/self/v1"]) {
-        NSLog(@"[MITM] ★★★ CAPTURED profile/self/v1 ★★★");
+    if ([req containsString:@"profile/self/v1"] || [req containsString:@"/aweme/v1/user/"]) {
+        NSLog(@"[MITM] ★★★ FOUND profile/self/v1 ★★★");
 
-        @synchronized (self.capturedRequests) {
-            [self.capturedRequests addObject:@{
-                @"time": [NSDate date],
-                @"request": requestLine,
-                @"headers": headers,
-                @"body": body
-            }];
+        // 解析请求
+        NSArray *lines = [req componentsSeparatedByString:@"\r\n"];
+        NSString *requestLine = lines.firstObject;
 
-            // 只保留最近 50 条
-            if (self.capturedRequests.count > 50) {
-                [self.capturedRequests removeObjectAtIndex:0];
+        NSMutableDictionary *headers = [NSMutableDictionary dictionary];
+        for (NSUInteger i = 1; i < lines.count; i++) {
+            NSString *line = lines[i];
+            if (line.length == 0) break;
+
+            NSRange colon = [line rangeOfString:@": "];
+            if (colon.location != NSNotFound) {
+                NSString *key = [line substringToIndex:colon.location];
+                NSString *val = [line substringFromIndex:colon.location + 2];
+                headers[key] = val;
             }
         }
+
+        // 提取 URL
+        NSArray *parts = [requestLine componentsSeparatedByString:@" "];
+        NSString *url = parts.count > 1 ? parts[1] : @"";
+
+        // 保存数据
+        [self saveData:url headers:headers body:@""];
+
+        self.captured = YES;
+        [[FloatingButton sharedButton] updateStatus:@"✅ 已捕获\nprofile/self"];
     }
 
-    // 转发请求到真实服务器
-    // TODO: 这里需要实现真实的转发逻辑
-
-    // 简单返回 200
-    NSString *response = @"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
-    send(clientSocket, [response UTF8String], response.length, 0);
-    close(clientSocket);
+    // 返回简单响应（实际应该转发）
+    const char *resp = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
+    send(client, resp, strlen(resp), 0);
+    close(client);
 }
 
-- (void)startWebInterface {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSLog(@"[MITM] Starting web interface on port %d...", self.webPort);
+- (void)saveData:(NSString *)url headers:(NSDictionary *)headers body:(NSString *)body {
+    NSMutableString *output = [NSMutableString string];
 
-        int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
-        if (serverSocket < 0) {
-            NSLog(@"[MITM] Failed to create web socket");
-            return;
-        }
+    [output appendString:@"==================== CAPTURED ====================\n"];
+    [output appendFormat:@"Time: %@\n", [NSDate date]];
+    [output appendString:@"==================================================\n\n"];
 
-        int reuse = 1;
-        setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    [output appendString:@"[REQUEST URL]\n"];
+    [output appendFormat:@"%@\n\n", url];
 
-        struct sockaddr_in serverAddr;
-        memset(&serverAddr, 0, sizeof(serverAddr));
-        serverAddr.sin_family = AF_INET;
-        serverAddr.sin_addr.s_addr = INADDR_ANY;
-        serverAddr.sin_port = htons(self.webPort);
-
-        if (bind(serverSocket, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0) {
-            NSLog(@"[MITM] Failed to bind web socket");
-            close(serverSocket);
-            return;
-        }
-
-        if (listen(serverSocket, 10) < 0) {
-            NSLog(@"[MITM] Failed to listen on web socket");
-            close(serverSocket);
-            return;
-        }
-
-        NSLog(@"[MITM] Web interface ready at http://192.168.9.102:%d/", self.webPort);
-
-        while (YES) {
-            struct sockaddr_in clientAddr;
-            socklen_t clientLen = sizeof(clientAddr);
-            int clientSocket = accept(serverSocket, (struct sockaddr *)&clientAddr, &clientLen);
-
-            if (clientSocket < 0) {
-                continue;
-            }
-
-            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                [self handleWebClient:clientSocket];
-            });
-        }
-    });
-}
-
-- (void)handleWebClient:(int)clientSocket {
-    char buffer[4096];
-    recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
-
-    NSString *html = [self generateHTML];
-    NSString *response = [NSString stringWithFormat:
-        @"HTTP/1.1 200 OK\r\n"
-        @"Content-Type: text/html; charset=utf-8\r\n"
-        @"Content-Length: %lu\r\n"
-        @"Connection: close\r\n"
-        @"\r\n%@",
-        (unsigned long)html.length, html
-    ];
-
-    send(clientSocket, [response UTF8String], response.length, 0);
-    close(clientSocket);
-}
-
-- (NSString *)generateHTML {
-    NSMutableString *html = [NSMutableString string];
-
-    [html appendString:@"<!DOCTYPE html><html><head><meta charset='utf-8'>"];
-    [html appendString:@"<meta name='viewport' content='width=device-width,initial-scale=1'>"];
-    [html appendString:@"<title>TikTok MITM Proxy</title>"];
-    [html appendString:@"<style>"];
-    [html appendString:@"body{font-family:monospace;padding:20px;background:#1e1e1e;color:#d4d4d4;}"];
-    [html appendString:@"h1{color:#4ec9b0;}"];
-    [html appendString:@".request{background:#252526;border:1px solid #3e3e42;padding:15px;margin:10px 0;border-radius:5px;}"];
-    [html appendString:@".time{color:#608b4e;}"];
-    [html appendString:@".url{color:#4fc1ff;word-break:break-all;}"];
-    [html appendString:@".header{color:#ce9178;margin:5px 0;}"];
-    [html appendString:@"</style></head><body>"];
-    [html appendString:@"<h1>🚀 TikTok MITM Proxy</h1>"];
-    [html appendFormat:@"<p>Captured: <b>%lu</b> requests</p>", (unsigned long)self.capturedRequests.count];
-
-    @synchronized (self.capturedRequests) {
-        for (NSDictionary *req in [self.capturedRequests reverseObjectEnumerator]) {
-            [html appendString:@"<div class='request'>"];
-            [html appendFormat:@"<div class='time'>%@</div>", req[@"time"]];
-            [html appendFormat:@"<div class='url'>%@</div>", req[@"request"]];
-            [html appendString:@"<div><b>Headers:</b></div>"];
-
-            NSDictionary *headers = req[@"headers"];
-            for (NSString *key in headers) {
-                [html appendFormat:@"<div class='header'>  %@: %@</div>", key, headers[key]];
-            }
-
-            [html appendString:@"</div>"];
-        }
+    [output appendString:@"[REQUEST HEADERS]\n"];
+    for (NSString *key in headers) {
+        [output appendFormat:@"%@: %@\n", key, headers[key]];
     }
 
-    [html appendString:@"<script>setTimeout(()=>location.reload(),3000);</script>"];
-    [html appendString:@"</body></html>"];
+    [output appendString:@"\n[RESPONSE BODY]\n"];
+    [output appendFormat:@"%@\n", body];
 
-    return html;
+    // 保存到沙盒
+    NSString *docPath = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    NSString *filePath = [docPath stringByAppendingPathComponent:@"tiktok_profile_captured.txt"];
+
+    [output writeToFile:filePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
+    NSLog(@"[MITM] 💾 Saved to: %@", filePath);
+    NSLog(@"[MITM] 📊 Headers count: %lu", (unsigned long)headers.count);
+
+    // 打印关键 headers
+    NSArray *keyHeaders = @[@"x-gorgon", @"x-khronos", @"x-tt-token", @"x-ss-stub", @"User-Agent"];
+    for (NSString *key in keyHeaders) {
+        if (headers[key]) {
+            NSLog(@"[MITM]   %@: %@", key, headers[key]);
+        }
+    }
 }
 
 @end
 
-// ==================== Hook 实现 ====================
+// ==================== Hooks ====================
 
 %hook TTHttpTask
 
 - (void)setSkipSSLCertificateError:(BOOL)skip {
-    NSLog(@"[MITM] setSkipSSLCertificateError called, forcing YES");
-    %orig(YES);  // 强制跳过证书验证
+    NSLog(@"[MITM] 🔓 Forcing SSL verification bypass");
+    %orig(YES);
 }
 
 %end
@@ -281,20 +238,17 @@ static MITMProxyServer *proxyServer = nil;
 %hook NSURLSessionConfiguration
 
 - (NSDictionary *)connectionProxyDictionary {
-    NSDictionary *orig = %orig;
-
-    // 强制设置代理到我们的本地代理服务器
-    NSDictionary *proxy = @{
-        @"HTTPEnable": @1,
+    NSDictionary *proxyDict = @{
+        @"HTTPEnable": @YES,
         @"HTTPProxy": @"127.0.0.1",
         @"HTTPPort": @8899,
-        @"HTTPSEnable": @1,
+        @"HTTPSEnable": @YES,
         @"HTTPSProxy": @"127.0.0.1",
         @"HTTPSPort": @8899
     };
 
-    NSLog(@"[MITM] Injecting proxy configuration");
-    return proxy;
+    NSLog(@"[MITM] 🔀 Redirecting traffic to local proxy");
+    return proxyDict;
 }
 
 %end
@@ -302,14 +256,16 @@ static MITMProxyServer *proxyServer = nil;
 // ==================== 初始化 ====================
 
 %ctor {
-    NSLog(@"[MITM] TikTok MITM Proxy loaded");
+    NSLog(@"[MITM] 🎯 TikTok MITM Proxy v2.0 loaded");
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        MITMProxyServer *server = [MITMProxyServer sharedInstance];
-        [server startProxy];
-        [server startWebInterface];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        // 显示悬浮窗
+        [[FloatingButton sharedButton] show];
 
-        NSLog(@"[MITM] ✓ All services started");
-        NSLog(@"[MITM] ✓ Web interface: http://192.168.9.102:9999/");
+        // 启动代理
+        [[MITMProxy shared] startProxy];
+
+        NSLog(@"[MITM] ✅ All services started");
+        NSLog(@"[MITM] 📱 Refresh TikTok profile page now!");
     });
 }
