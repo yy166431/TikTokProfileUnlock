@@ -13,6 +13,10 @@ static int captureCount = 0;
 static UIButton *floatingButton = nil;
 static UIWindow *dataWindow = nil;
 
+// URL 缓存：用于关联请求和响应
+// Key: 线程ID, Value: @{url, headers, timestamp}
+static NSMutableDictionary *pendingRequests = nil;
+
 // 前置声明
 static void showDataWindow();
 static void closeDataWindow();
@@ -457,13 +461,16 @@ static void closeDataWindow() {
 
 %hook TTHttpResponseChromium
 
-- (instancetype)initWithURL:(NSURL *)url statusCode:(NSInteger)code HTTPVersion:(id)version headerFields:(NSDictionary *)headers {
-    id result = %orig;
+- (NSDictionary *)allHeaderFields {
+    NSDictionary *headers = %orig;
+
+    // 获取当前对象的 URL
+    NSURL *url = [self URL];
 
     if (url) {
         NSString *urlStr = [url absoluteString];
 
-        if ([urlStr containsString:@"profile/self"]) {
+        if ([urlStr containsString:@"profile"] || [urlStr containsString:@"self"]) {
             captureCount++;
 
             NSMutableDictionary *capture = [NSMutableDictionary new];
@@ -471,16 +478,22 @@ static void closeDataWindow() {
             capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
             capture[@"type"] = @"response_headers";
             capture[@"url"] = urlStr;
-            capture[@"statusCode"] = @(code);
             capture[@"headers"] = headers ?: @{};
 
             [capturedData addObject:capture];
 
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (floatingButton) {
+                    [floatingButton setTitle:[NSString stringWithFormat:@"%d", captureCount] forState:UIControlStateNormal];
+                }
+            });
+
             NSLog(@"[TKCapture] ★★★ Response #%d: %@", captureCount, urlStr);
+            NSLog(@"[TKCapture] Headers: %@", headers);
         }
     }
 
-    return result;
+    return headers;
 }
 
 %end
