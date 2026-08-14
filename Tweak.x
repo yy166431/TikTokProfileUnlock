@@ -119,22 +119,91 @@ static void setupLocalServer() {
             if (jsonStr && [jsonStr containsString:@"author_stats"]) {
                 captureCount++;
 
+                // 获取调用栈找 URL
+                NSArray *callStack = [NSThread callStackSymbols];
+                NSString *stackInfo = [callStack componentsJoinedByString:@"\n"];
+
                 NSMutableDictionary *capture = [NSMutableDictionary new];
                 capture[@"id"] = @(captureCount);
                 capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
-                capture[@"type"] = @"response";
-                capture[@"url"] = @"profile/self";
+                capture[@"type"] = @"response_json";
                 capture[@"response"] = jsonStr;
+                capture[@"stack"] = stackInfo;
 
                 [capturedData addObject:capture];
 
-                NSLog(@"[TKCapture] ★★★ Captured #%d (size: %lu)",
+                NSLog(@"[TKCapture] ★★★ JSON #%d (size: %lu)",
                     captureCount, (unsigned long)data.length);
             }
         } @catch (NSException *e) {}
     }
 
     return result;
+}
+
+%end
+
+// ==================== Hook NSURLConnection ====================
+
+%hook NSURLConnection
+
++ (NSData *)sendSynchronousRequest:(NSURLRequest *)request returningResponse:(NSURLResponse **)response error:(NSError **)error {
+    if (request) {
+        NSURL *url = [request URL];
+        NSString *urlStr = [url absoluteString];
+
+        if ([urlStr containsString:@"profile/self"]) {
+            captureCount++;
+
+            NSMutableDictionary *capture = [NSMutableDictionary new];
+            capture[@"id"] = @(captureCount);
+            capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
+            capture[@"type"] = @"request_sync";
+            capture[@"url"] = urlStr;
+            capture[@"method"] = [request HTTPMethod] ?: @"GET";
+            capture[@"headers"] = [request allHTTPHeaderFields] ?: @{};
+            capture[@"body"] = [request HTTPBody] ? [[NSString alloc] initWithData:[request HTTPBody] encoding:NSUTF8StringEncoding] : @"";
+
+            [capturedData addObject:capture];
+            NSLog(@"[TKCapture] ★ Sync Request #%d: %@", captureCount, urlStr);
+        }
+    }
+
+    return %orig;
+}
+
+%end
+
+// ==================== Hook NSURLSession ====================
+
+%hook NSURLSessionTask
+
+- (void)resume {
+    NSURLRequest *request = [self currentRequest];
+    if (!request) request = [self originalRequest];
+
+    if (request) {
+        NSURL *url = [request URL];
+        NSString *urlStr = [url absoluteString];
+
+        if ([urlStr containsString:@"profile/self"]) {
+            captureCount++;
+
+            NSMutableDictionary *capture = [NSMutableDictionary new];
+            capture[@"id"] = @(captureCount);
+            capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
+            capture[@"type"] = @"request_task";
+            capture[@"url"] = urlStr;
+            capture[@"method"] = [request HTTPMethod] ?: @"GET";
+            capture[@"headers"] = [request allHTTPHeaderFields] ?: @{};
+            capture[@"body"] = [request HTTPBody] ? [[NSString alloc] initWithData:[request HTTPBody] encoding:NSUTF8StringEncoding] : @"";
+
+            [capturedData addObject:capture];
+            NSLog(@"[TKCapture] ★ Task Request #%d: %@", captureCount, urlStr);
+        }
+    }
+
+    %orig;
 }
 
 %end
