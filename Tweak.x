@@ -774,6 +774,80 @@ static void installAEADHooks() {
 }
 
 // ============================================
+// SQLite Hook - 拦截数据库查询（抓解密后的明文）
+// ============================================
+
+typedef struct sqlite3 sqlite3;
+typedef struct sqlite3_stmt sqlite3_stmt;
+
+static int (*orig_sqlite3_step)(sqlite3_stmt*) = NULL;
+static const unsigned char* (*orig_sqlite3_column_text)(sqlite3_stmt*, int) = NULL;
+static const char* (*orig_sqlite3_column_name)(sqlite3_stmt*, int) = NULL;
+static int (*orig_sqlite3_column_count)(sqlite3_stmt*) = NULL;
+
+static int my_sqlite3_step(sqlite3_stmt *stmt) {
+    int ret = orig_sqlite3_step(stmt);
+
+    if (ret == 100) { // SQLITE_ROW - 成功返回一行数据
+        @try {
+            int colCount = orig_sqlite3_column_count ? orig_sqlite3_column_count(stmt) : 0;
+            if (colCount <= 0 || colCount > 200) return ret; // 防御性检查
+
+            NSMutableDictionary *row = [NSMutableDictionary dictionary];
+            NSMutableString *rawLine = [NSMutableString string];
+
+            // 读取这一行的所有列
+            for (int i = 0; i < colCount; i++) {
+                const char *colName = orig_sqlite3_column_name ? orig_sqlite3_column_name(stmt, i) : NULL;
+                const unsigned char *colValue = orig_sqlite3_column_text ? orig_sqlite3_column_text(stmt, i) : NULL;
+
+                if (colName && colValue) {
+                    NSString *name = @(colName);
+                    NSString *value = @((const char*)colValue);
+                    row[name] = value;
+                    [rawLine appendFormat:@"%@=%@ | ", name, value.length > 50 ? [value substringToIndex:50] : value];
+                }
+            }
+
+            // 检查是否包含用户数据特征字段
+            if (row[@"sec_uid"] || row[@"follower_count"] || row[@"unique_id"] ||
+                row[@"aweme_count"] || row[@"following_count"] || row[@"nickname"] ||
+                [rawLine rangeOfString:@"sec_uid" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [rawLine rangeOfString:@"follower" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+
+                HLog(@"[SQLite★] 用户数据行: %@", rawLine.length > 1000 ? [rawLine substringToIndex:1000] : rawLine);
+                recordCapture(@"[SQLite★]", @"DB", [row description], nil, nil);
+            }
+        } @catch (__unused NSException *e) {}
+    }
+
+    return ret;
+}
+
+static void installSQLiteHooks() {
+    struct rebinding rebs[4];
+
+    rebs[0].name = "sqlite3_step";
+    rebs[0].replacement = (void*)my_sqlite3_step;
+    rebs[0].replaced = (void**)&orig_sqlite3_step;
+
+    rebs[1].name = "sqlite3_column_text";
+    rebs[1].replacement = NULL;
+    rebs[1].replaced = (void**)&orig_sqlite3_column_text;
+
+    rebs[2].name = "sqlite3_column_name";
+    rebs[2].replacement = NULL;
+    rebs[2].replaced = (void**)&orig_sqlite3_column_name;
+
+    rebs[3].name = "sqlite3_column_count";
+    rebs[3].replacement = NULL;
+    rebs[3].replaced = (void**)&orig_sqlite3_column_count;
+
+    rebind_symbols(rebs, 4);
+    HLog(@"✅ SQLite hooks 已安装");
+}
+
+// ============================================
 // Model 层 Hook - 抓内存缓存的 profile 数据
 // ============================================
 
@@ -870,39 +944,7 @@ static void installAEADHooks() {
 %ctor {
     capturedRequests = [NSMutableArray array];
     installAEADHooks();   // 尽早挂, 抓全流量
-
-    // 枚举所有 User/Profile 类
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_global_queue(0,0), ^{
-        NSMutableArray *userClasses = [NSMutableArray array];
-        NSMutableArray *profileClasses = [NSMutableArray array];
-
-        unsigned int count = 0;
-        Class *classes = objc_copyClassList(&count);
-        for (unsigned int i = 0; i < count; i++) {
-            const char *name = class_getName(classes[i]);
-            if (!name) continue;
-            NSString *className = [NSString stringWithUTF8String:name];
-            NSString *lower = [className lowercaseString];
-
-            if ([lower containsString:@"user"] && ![lower containsString:@"default"]) {
-                [userClasses addObject:className];
-            }
-            if ([lower containsString:@"profile"]) {
-                [profileClasses addObject:className];
-            }
-        }
-        free(classes);
-
-        HLog(@"========== 找到 %lu 个 User 类 ==========", (unsigned long)userClasses.count);
-        for (NSString *cls in [userClasses subarrayWithRange:NSMakeRange(0, MIN(50, userClasses.count))]) {
-            HLog(@"  %@", cls);
-        }
-
-        HLog(@"========== 找到 %lu 个 Profile 类 ==========", (unsigned long)profileClasses.count);
-        for (NSString *cls in [profileClasses subarrayWithRange:NSMakeRange(0, MIN(50, profileClasses.count))]) {
-            HLog(@"  %@", cls);
-        }
-    });
+    installSQLiteHooks(); // 拦截 WCDB 解密后的明文数据
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         createFloatingButton();
