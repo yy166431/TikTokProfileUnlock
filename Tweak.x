@@ -167,18 +167,35 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
             }
         }
 
-        // Extract query string
-        NSRange musicalRange = [raw rangeOfString:@"musical_ly"];
-        if (musicalRange.location != NSNotFound) {
-            NSString *qStr = [raw substringFromIndex:musicalRange.location];
-            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^([a-zA-Z0-9&=_\\-%.]+)" options:0 error:nil];
-            NSTextCheckingResult *match = [regex firstMatchInString:qStr options:0 range:NSMakeRange(0, MIN(2000, qStr.length))];
-            if (match) {
-                query = [qStr substringWithRange:[match rangeAtIndex:1]];
+        // Extract query string - try multiple patterns
+        NSString *query = @"";
+
+        // Pattern 1: Look for common API paths
+        NSArray *apiPaths = @[@"musical_ly", @"api-t.tiktokv.com", @"api22-normal", @"tiktok/v1"];
+        for (NSString *path in apiPaths) {
+            NSRange pathRange = [raw rangeOfString:path];
+            if (pathRange.location != NSNotFound) {
+                NSString *qStr = [raw substringFromIndex:pathRange.location];
+                NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^([a-zA-Z0-9&=_\\-%.?/]+)" options:0 error:nil];
+                NSTextCheckingResult *match = [regex firstMatchInString:qStr options:0 range:NSMakeRange(0, MIN(3000, qStr.length))];
+                if (match) {
+                    query = [qStr substringWithRange:[match rangeAtIndex:1]];
+                    break;
+                }
             }
         }
 
-        NSString *fullURL = [NSString stringWithFormat:@"https://api-t.tiktokv.com/tiktok/user/profile/self/v1?%@", query];
+        // Try to extract full URL if possible
+        NSString *fullURL = @"";
+        if (query.length > 0) {
+            if ([query containsString:@"://"]) {
+                fullURL = query; // Already a full URL
+            } else if ([query hasPrefix:@"/"]) {
+                fullURL = [NSString stringWithFormat:@"https://api-t.tiktokv.com%@", query];
+            } else {
+                fullURL = [NSString stringWithFormat:@"https://api-t.tiktokv.com/?%@", query];
+            }
+        }
 
         // Store captured data with parsed fields
         NSDictionary *item = @{
