@@ -33,16 +33,10 @@ jobs:
       run: |
         export THEOS=./theos
         make clean
-        make package FINALPACKAGE=1
+        make
 
     - name: Upload dylib
       uses: actions/upload-artifact@v4
       with:
         name: TikTokHeadersCapture
-        path: .theos/obj/debug/TikTokHeadersCapture.dylib
-
-    - name: Upload deb
-      uses: actions/upload-artifact@v4
-      with:
-        name: TikTokHeadersCapture-deb
-        path: packages/*.deb
+        path: .theos/obj/TikTokHeadersCapture.dylib
