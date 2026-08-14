@@ -21,24 +21,31 @@ jobs:
       env:
         THEOS: /opt/theos
 
+    - name: Install GCDWebServer
+      run: |
+        git clone https://github.com/swisspol/GCDWebServer.git
+        sudo cp -r GCDWebServer/GCDWebServer $THEOS/include/
+
     - name: Build dylib
       run: |
         export THEOS=/opt/theos
         make clean
-        make package FINALPACKAGE=1
+        make FINALPACKAGE=1
 
     - name: Extract dylib
       run: |
         mkdir -p output
-        dpkg-deb -x packages/*.deb output/
-        find output -name "*.dylib" -exec cp {} TikTokCapture.dylib \;
+        cp .theos/obj/TikTokCapture.dylib output/
+        cp TikTokCapture.plist output/
+        cd output && zip -r TikTokCapture.zip TikTokCapture.dylib TikTokCapture.plist
 
     - name: Upload Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: v1.0.${{ github.run_number }}
         files: |
-          TikTokCapture.dylib
-          packages/*.deb
+          output/TikTokCapture.dylib
+          output/TikTokCapture.plist
+          output/TikTokCapture.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
