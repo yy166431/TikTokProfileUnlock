@@ -62,7 +62,7 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
         // Parse headers and URL from raw data - improved parsing
         NSString *argus = @"", *gorgon = @"", *khronos = @"", *ladon = @"", *query = @"";
 
-        // Extract x-argus (format: x-argus=VALUE or x-argus: VALUE)
+        // Extract x-argus (format: x-argus=VALUE or x-argus: VALUE or x-argusVALUE)
         NSRange argusRange = [raw rangeOfString:@"x-argus"];
         if (argusRange.location != NSNotFound) {
             NSInteger start = argusRange.location + 7; // skip "x-argus"
@@ -73,11 +73,11 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
                 start++;
             }
             NSString *sub = [raw substringFromIndex:start];
-            // Find next 'x-' header
-            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^([^x]+?)(?=x-[a-z])" options:0 error:nil];
+            // x-argus is at the end, extract until non-base64 char or end
+            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^([A-Za-z0-9+/=_-]+)" options:0 error:nil];
             NSTextCheckingResult *match = [regex firstMatchInString:sub options:0 range:NSMakeRange(0, MIN(2000, sub.length))];
-            if (match && match.range.location != NSNotFound) {
-                argus = [[sub substringWithRange:[match rangeAtIndex:1]] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (match) {
+                argus = [sub substringWithRange:[match rangeAtIndex:1]];
             }
         }
 
