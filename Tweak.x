@@ -355,7 +355,7 @@ static void closeDataWindow() {
         NSURL *url = [request URL];
         NSString *urlStr = [url absoluteString];
 
-        if ([urlStr containsString:@"profile/self"]) {
+        if ([urlStr containsString:@"profile/self/v1"]) {
             captureCount++;
 
             NSMutableDictionary *capture = [NSMutableDictionary new];
@@ -389,7 +389,7 @@ static void closeDataWindow() {
         NSURL *url = [request URL];
         NSString *urlStr = [url absoluteString];
 
-        if ([urlStr containsString:@"profile/self"]) {
+        if ([urlStr containsString:@"profile/self/v1"]) {
             captureCount++;
 
             NSMutableDictionary *capture = [NSMutableDictionary new];
@@ -420,7 +420,7 @@ static void closeDataWindow() {
 
     if (url) {
         NSString *urlStr = [url absoluteString];
-        if ([urlStr containsString:@"profile/self"]) {
+        if ([urlStr containsString:@"profile/self/v1"]) {
             NSMutableDictionary *capture = [NSMutableDictionary new];
             capture[@"id"] = @(++captureCount);
             capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
@@ -443,7 +443,7 @@ static void closeDataWindow() {
 
     if (url) {
         NSString *urlStr = [url absoluteString];
-        if ([urlStr containsString:@"profile/self"]) {
+        if ([urlStr containsString:@"profile/self/v1"]) {
             NSMutableDictionary *capture = [NSMutableDictionary new];
             capture[@"id"] = @(++captureCount);
             capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
@@ -473,7 +473,7 @@ static void closeDataWindow() {
     NSURL *url = [self URL];
     if (url) {
         NSString *urlStr = [url absoluteString];
-        if ([urlStr containsString:@"profile/self"]) {
+        if ([urlStr containsString:@"profile/self/v1"]) {
             NSMutableDictionary *capture = [NSMutableDictionary new];
             capture[@"id"] = @(++captureCount);
             capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
@@ -504,7 +504,7 @@ static void closeDataWindow() {
     if (url) {
         NSString *urlStr = [url absoluteString];
 
-        if ([urlStr containsString:@"profile"] || [urlStr containsString:@"self"]) {
+        if ([urlStr containsString:@"profile/self/v1"]) {
             captureCount++;
 
             NSMutableDictionary *capture = [NSMutableDictionary new];
@@ -545,8 +545,8 @@ static void closeDataWindow() {
             NSURL *url = [request URL];
             NSString *urlStr = [url absoluteString];
 
-            // 只捕获 profile/self 相关请求
-            if ([urlStr containsString:@"profile"] || [urlStr containsString:@"self"]) {
+            // 只捕获 profile/self/v1 接口
+            if ([urlStr containsString:@"profile/self/v1"]) {
                 captureCount++;
 
                 // 创建请求记录
