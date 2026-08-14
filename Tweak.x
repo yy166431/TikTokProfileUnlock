@@ -254,7 +254,7 @@ static void startHTTPServer() {
 
 // ==================== Floating Button ====================
 
-static void showDataWindow() {
+__attribute__((unused)) static void showDataWindow() {
     if (dataWindow) {
         [dataWindow makeKeyAndVisible];
         return;
@@ -298,7 +298,7 @@ static void showDataWindow() {
     [dataWindow makeKeyAndVisible];
 }
 
-static void closeDataWindow() {
+__attribute__((unused)) static void closeDataWindow() {
     if (dataWindow) {
         dataWindow.hidden = YES;
         dataWindow = nil;
@@ -340,7 +340,7 @@ static void createFloatingButton() {
     });
 }
 
-static void handlePan(UIPanGestureRecognizer *gesture) {
+__attribute__((unused)) static void handlePan(UIPanGestureRecognizer *gesture) {
     CGPoint translation = [gesture translationInView:gesture.view.superview];
     gesture.view.center = CGPointMake(gesture.view.center.x + translation.x, gesture.view.center.y + translation.y);
     [gesture setTranslation:CGPointZero inView:gesture.view.superview];
