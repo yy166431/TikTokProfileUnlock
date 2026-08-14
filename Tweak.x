@@ -115,9 +115,7 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
             }
         });
 
-        NSLog(@"[TikTokHeaders] Captured #%d: argus=%@, gorgon=%@", captureCount,
-              [argus substringToIndex:MIN(20, argus.length)],
-              [gorgon substringToIndex:MIN(20, gorgon.length)]);
+        NSLog(@"[TikTokHeaders] Captured #%d, raw length: %lu", captureCount, (unsigned long)raw.length);
     }
 
     return result;
