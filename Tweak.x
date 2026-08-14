@@ -57,10 +57,17 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
             return result;
         }
 
+        // Only capture if both x-tt-token and user-agent exist
+        if ([raw rangeOfString:@"x-tt-token"].location == NSNotFound ||
+            [raw rangeOfString:@"user-agent"].location == NSNotFound) {
+            return result;
+        }
+
         captureCount++;
 
         // Parse headers and URL from raw data - improved parsing
         NSString *argus = @"", *gorgon = @"", *khronos = @"", *ladon = @"", *query = @"";
+        NSString *ttToken = @"", *userAgent = @"";
 
         // Extract x-argus (format: x-argus=VALUE or x-argus: VALUE or x-argusVALUE)
         NSRange argusRange = [raw rangeOfString:@"x-argus"];
@@ -78,6 +85,40 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
             NSTextCheckingResult *match = [regex firstMatchInString:sub options:0 range:NSMakeRange(0, MIN(2000, sub.length))];
             if (match) {
                 argus = [sub substringWithRange:[match rangeAtIndex:1]];
+            }
+        }
+
+        // Extract x-tt-token
+        NSRange ttTokenRange = [raw rangeOfString:@"x-tt-token"];
+        if (ttTokenRange.location != NSNotFound) {
+            NSInteger start = ttTokenRange.location + 10; // skip "x-tt-token"
+            while (start < raw.length) {
+                unichar ch = [raw characterAtIndex:start];
+                if (ch != '=' && ch != ':' && ch != ' ') break;
+                start++;
+            }
+            NSString *sub = [raw substringFromIndex:start];
+            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^([A-Za-z0-9_-]+)" options:0 error:nil];
+            NSTextCheckingResult *match = [regex firstMatchInString:sub options:0 range:NSMakeRange(0, MIN(500, sub.length))];
+            if (match) {
+                ttToken = [sub substringWithRange:[match rangeAtIndex:1]];
+            }
+        }
+
+        // Extract user-agent
+        NSRange uaRange = [raw rangeOfString:@"user-agent" options:NSCaseInsensitiveSearch];
+        if (uaRange.location != NSNotFound) {
+            NSInteger start = uaRange.location + 10; // skip "user-agent"
+            while (start < raw.length) {
+                unichar ch = [raw characterAtIndex:start];
+                if (ch != '=' && ch != ':' && ch != ' ') break;
+                start++;
+            }
+            NSString *sub = [raw substringFromIndex:start];
+            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^([^\r\n]+)" options:0 error:nil];
+            NSTextCheckingResult *match = [regex firstMatchInString:sub options:0 range:NSMakeRange(0, MIN(500, sub.length))];
+            if (match) {
+                userAgent = [[sub substringWithRange:[match rangeAtIndex:1]] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
             }
         }
 
@@ -154,7 +195,9 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
                 @"x-argus": argus,
                 @"x-gorgon": gorgon,
                 @"x-khronos": khronos,
-                @"x-ladon": ladon
+                @"x-ladon": ladon,
+                @"x-tt-token": ttToken,
+                @"user-agent": userAgent
             },
             @"raw_x26": raw,
             @"raw_length": @(raw.length)
@@ -197,6 +240,8 @@ static NSString* generateHTML() {
         [html appendFormat:@"<div class='header'><span class='label'>x-argus:</span> %@</div>", headers[@"x-argus"]];
         [html appendFormat:@"<div class='header'><span class='label'>x-gorgon:</span> %@</div>", headers[@"x-gorgon"]];
         [html appendFormat:@"<div class='header'><span class='label'>x-khronos:</span> %@</div>", headers[@"x-khronos"]];
+        [html appendFormat:@"<div class='header'><span class='label'>x-tt-token:</span> %@</div>", headers[@"x-tt-token"]];
+        [html appendFormat:@"<div class='header'><span class='label'>user-agent:</span> %@</div>", headers[@"user-agent"]];
 
         NSString *ladon = headers[@"x-ladon"];
         if (ladon.length > 100) {
@@ -332,6 +377,8 @@ __attribute__((unused)) static void showDataWindow() {
         [text appendFormat:@"x-argus: %@\n", h[@"x-argus"]];
         [text appendFormat:@"x-gorgon: %@\n", h[@"x-gorgon"]];
         [text appendFormat:@"x-khronos: %@\n", h[@"x-khronos"]];
+        [text appendFormat:@"x-tt-token: %@\n", h[@"x-tt-token"]];
+        [text appendFormat:@"user-agent: %@\n", h[@"user-agent"]];
         [text appendFormat:@"x-ladon: %@\n\n", [h[@"x-ladon"] substringToIndex:MIN(80, [h[@"x-ladon"] length])]];
     }
 
