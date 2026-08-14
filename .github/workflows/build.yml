@@ -25,6 +25,10 @@ jobs:
         unzip master.zip
         mv sdks-master/iPhoneOS*.sdk theos/sdks/
 
+    - name: Install ldid
+      run: |
+        brew install ldid
+
     - name: Build dylib
       run: |
         export THEOS=./theos
