@@ -765,10 +765,6 @@ static void closeDataWindow() {
                 }
             }
         } @catch (NSException *e) {
-                    }
-                }
-            }
-        } @catch (NSException *e) {
             NSLog(@"[TKCapture] Exception in completion handler: %@", e);
         }
 
