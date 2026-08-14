@@ -124,6 +124,10 @@ static void setupLocalServer() {
     showDataWindow();
 }
 
+- (void)tkc_closeWindow {
+    closeDataWindow();
+}
+
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
     UIView *button = gesture.view;
     CGPoint translation = [gesture translationInView:button.superview];
@@ -250,7 +254,7 @@ static void showDataWindow() {
         closeBtn.frame = CGRectMake(frame.size.width - 70, 10, 60, 30);
         [closeBtn setTitle:@"关闭" forState:UIControlStateNormal];
         [closeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        [closeBtn addTarget:nil action:@selector(closeDataWindow) forControlEvents:UIControlEventTouchUpInside];
+        [closeBtn addTarget:closeBtn action:@selector(tkc_closeWindow) forControlEvents:UIControlEventTouchUpInside];
         [dataWindow addSubview:closeBtn];
 
         [dataWindow makeKeyAndVisible];
