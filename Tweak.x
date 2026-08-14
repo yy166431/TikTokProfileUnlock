@@ -139,6 +139,86 @@ static void setupLocalServer() {
 
 %end
 
+// ==================== Hook NSURLRequest ====================
+
+%hook NSURLRequest
+
+- (instancetype)initWithURL:(NSURL *)url {
+    id result = %orig;
+
+    if (url) {
+        NSString *urlStr = [url absoluteString];
+        if ([urlStr containsString:@"profile/self"]) {
+            NSMutableDictionary *capture = [NSMutableDictionary new];
+            capture[@"id"] = @(++captureCount);
+            capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
+            capture[@"type"] = @"request";
+            capture[@"url"] = urlStr;
+            capture[@"method"] = [self HTTPMethod] ?: @"GET";
+            capture[@"headers"] = [self allHTTPHeaderFields] ?: @{};
+            capture[@"body"] = [self HTTPBody] ? [[NSString alloc] initWithData:[self HTTPBody] encoding:NSUTF8StringEncoding] : @"";
+
+            [capturedData addObject:capture];
+            NSLog(@"[TKCapture] ★ Request #%d: %@", captureCount, urlStr);
+        }
+    }
+
+    return result;
+}
+
+- (instancetype)initWithURL:(NSURL *)url cachePolicy:(NSURLRequestCachePolicy)policy timeoutInterval:(NSTimeInterval)timeout {
+    id result = %orig;
+
+    if (url) {
+        NSString *urlStr = [url absoluteString];
+        if ([urlStr containsString:@"profile/self"]) {
+            NSMutableDictionary *capture = [NSMutableDictionary new];
+            capture[@"id"] = @(++captureCount);
+            capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
+            capture[@"type"] = @"request";
+            capture[@"url"] = urlStr;
+            capture[@"method"] = [self HTTPMethod] ?: @"GET";
+            capture[@"headers"] = [self allHTTPHeaderFields] ?: @{};
+            capture[@"body"] = [self HTTPBody] ? [[NSString alloc] initWithData:[self HTTPBody] encoding:NSUTF8StringEncoding] : @"";
+
+            [capturedData addObject:capture];
+            NSLog(@"[TKCapture] ★ Request #%d: %@", captureCount, urlStr);
+        }
+    }
+
+    return result;
+}
+
+%end
+
+// ==================== Hook NSMutableURLRequest ====================
+
+%hook NSMutableURLRequest
+
+- (void)setHTTPBody:(NSData *)body {
+    %orig;
+
+    NSURL *url = [self URL];
+    if (url) {
+        NSString *urlStr = [url absoluteString];
+        if ([urlStr containsString:@"profile/self"]) {
+            NSMutableDictionary *capture = [NSMutableDictionary new];
+            capture[@"id"] = @(++captureCount);
+            capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
+            capture[@"type"] = @"request_body";
+            capture[@"url"] = urlStr;
+            capture[@"method"] = [self HTTPMethod] ?: @"POST";
+            capture[@"headers"] = [self allHTTPHeaderFields] ?: @{};
+            capture[@"body"] = body ? [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding] : @"";
+
+            [capturedData addObject:capture];
+            NSLog(@"[TKCapture] ★ Request Body #%d: %lu bytes", captureCount, (unsigned long)body.length);
+        }
+    }
+}
+
+%end
+
 // ==================== Hook TTHttpResponseChromium ====================
 
 %hook TTHttpResponseChromium
@@ -155,14 +235,14 @@ static void setupLocalServer() {
             NSMutableDictionary *capture = [NSMutableDictionary new];
             capture[@"id"] = @(captureCount);
             capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
-            capture[@"type"] = @"request";
+            capture[@"type"] = @"response_headers";
             capture[@"url"] = urlStr;
             capture[@"statusCode"] = @(code);
             capture[@"headers"] = headers ?: @{};
 
             [capturedData addObject:capture];
 
-            NSLog(@"[TKCapture] ★★★ URL #%d: %@", captureCount, urlStr);
+            NSLog(@"[TKCapture] ★★★ Response #%d: %@", captureCount, urlStr);
         }
     }
 
