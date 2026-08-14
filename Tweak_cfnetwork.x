@@ -79,7 +79,13 @@ static void HLog(NSString *format, ...) {
 
                 // 写悬浮窗显示
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    UIWindow *keyWindow = [[UIApplication sharedApplication] keyWindow];
+                    UIWindow *keyWindow = nil;
+                    for (UIWindow *window in [[UIApplication sharedApplication] windows]) {
+                        if (window.isKeyWindow) {
+                            keyWindow = window;
+                            break;
+                        }
+                    }
                     if (keyWindow) {
                         UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 100, 300, 80)];
                         label.text = [NSString stringWithFormat:@"✅ 抓到用户数据!\n共%d条", captureCount];
@@ -128,7 +134,13 @@ static void HLog(NSString *format, ...) {
         HLog(@"[心跳] 插件运行中, 进程=%@", [[NSProcessInfo processInfo] processName]);
 
         // 显示加载提示
-        UIWindow *keyWindow = [[UIApplication sharedApplication] keyWindow];
+        UIWindow *keyWindow = nil;
+        for (UIWindow *window in [[UIApplication sharedApplication] windows]) {
+            if (window.isKeyWindow) {
+                keyWindow = window;
+                break;
+            }
+        }
         if (keyWindow) {
             UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 50, 200, 50)];
             label.text = @"🔍 抓包插件已加载";
