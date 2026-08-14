@@ -61,7 +61,11 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
 
         // Parse headers and URL from raw data - improved parsing
         NSString *argus = @"", *gorgon = @"", *khronos = @"", *ladon = @"";
-        NSString *ttToken = @"", *userAgent = @"";
+        NSString *ttToken = @"", *userAgent = @"", *cookie = @"";
+        NSString *ttPbaEncode = @"", *vcBdturingSdkVersion = @"", *passportSdkVersion = @"";
+        NSString *pnsAttEnable = @"", *oecVcSdkVersion = @"", *ttRequestTag = @"";
+        NSString *rpcPersistPnsRegion1 = @"", *ttStoreRegion = @"", *ttStoreRegionSrc = @"";
+        NSString *rpcPersistPyxisPolicyVTnc = @"", *ssDp = @"", *ttTraceId = @"", *acceptEncoding = @"";
 
         // Extract x-argus (format: x-argus=VALUE or x-argus: VALUE or x-argusVALUE)
         NSRange argusRange = [raw rangeOfString:@"x-argus"];
@@ -115,6 +119,24 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
                 userAgent = [[sub substringWithRange:[match rangeAtIndex:1]] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
             }
         }
+
+        // Extract cookie
+        cookie = extractValue(raw, @"cookie", 5000);
+
+        // Extract additional headers
+        ttPbaEncode = extractValue(raw, @"x-tt-pba-encode", 20);
+        vcBdturingSdkVersion = extractValue(raw, @"x-vc-bdturing-sdk-version", 20);
+        passportSdkVersion = extractValue(raw, @"passport-sdk-version", 20);
+        pnsAttEnable = extractValue(raw, @"pns-att-enable", 10);
+        oecVcSdkVersion = extractValue(raw, @"oec-vc-sdk-version", 30);
+        ttRequestTag = extractValue(raw, @"x-tt-request-tag", 30);
+        rpcPersistPnsRegion1 = extractValue(raw, @"rpc-persist-pns-region-1", 50);
+        ttStoreRegion = extractValue(raw, @"x-tt-store-region", 10);
+        ttStoreRegionSrc = extractValue(raw, @"x-tt-store-region-src", 10);
+        rpcPersistPyxisPolicyVTnc = extractValue(raw, @"rpc-persist-pyxis-policy-v-tnc", 10);
+        ssDp = extractValue(raw, @"x-ss-dp", 10);
+        ttTraceId = extractValue(raw, @"x-tt-trace-id", 100);
+        acceptEncoding = extractValue(raw, @"accept-encoding", 50);
 
         // Extract x-gorgon
         NSRange gorgonRange = [raw rangeOfString:@"x-gorgon"];
@@ -208,7 +230,21 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
                 @"x-khronos": khronos,
                 @"x-ladon": ladon,
                 @"x-tt-token": ttToken,
-                @"user-agent": userAgent
+                @"user-agent": userAgent,
+                @"cookie": cookie,
+                @"x-tt-pba-encode": ttPbaEncode,
+                @"x-vc-bdturing-sdk-version": vcBdturingSdkVersion,
+                @"passport-sdk-version": passportSdkVersion,
+                @"pns-att-enable": pnsAttEnable,
+                @"oec-vc-sdk-version": oecVcSdkVersion,
+                @"x-tt-request-tag": ttRequestTag,
+                @"rpc-persist-pns-region-1": rpcPersistPnsRegion1,
+                @"x-tt-store-region": ttStoreRegion,
+                @"x-tt-store-region-src": ttStoreRegionSrc,
+                @"rpc-persist-pyxis-policy-v-tnc": rpcPersistPyxisPolicyVTnc,
+                @"x-ss-dp": ssDp,
+                @"x-tt-trace-id": ttTraceId,
+                @"accept-encoding": acceptEncoding
             },
             @"raw_x26": raw,
             @"raw_length": @(raw.length)
@@ -253,12 +289,32 @@ static NSString* generateHTML() {
         [html appendFormat:@"<div class='header'><span class='label'>x-khronos:</span> %@</div>", headers[@"x-khronos"]];
         [html appendFormat:@"<div class='header'><span class='label'>x-tt-token:</span> %@</div>", headers[@"x-tt-token"]];
         [html appendFormat:@"<div class='header'><span class='label'>user-agent:</span> %@</div>", headers[@"user-agent"]];
+        [html appendFormat:@"<div class='header'><span class='label'>x-tt-pba-encode:</span> %@</div>", headers[@"x-tt-pba-encode"]];
+        [html appendFormat:@"<div class='header'><span class='label'>x-vc-bdturing-sdk-version:</span> %@</div>", headers[@"x-vc-bdturing-sdk-version"]];
+        [html appendFormat:@"<div class='header'><span class='label'>passport-sdk-version:</span> %@</div>", headers[@"passport-sdk-version"]];
+        [html appendFormat:@"<div class='header'><span class='label'>pns-att-enable:</span> %@</div>", headers[@"pns-att-enable"]];
+        [html appendFormat:@"<div class='header'><span class='label'>oec-vc-sdk-version:</span> %@</div>", headers[@"oec-vc-sdk-version"]];
+        [html appendFormat:@"<div class='header'><span class='label'>x-tt-request-tag:</span> %@</div>", headers[@"x-tt-request-tag"]];
+        [html appendFormat:@"<div class='header'><span class='label'>rpc-persist-pns-region-1:</span> %@</div>", headers[@"rpc-persist-pns-region-1"]];
+        [html appendFormat:@"<div class='header'><span class='label'>x-tt-store-region:</span> %@</div>", headers[@"x-tt-store-region"]];
+        [html appendFormat:@"<div class='header'><span class='label'>x-tt-store-region-src:</span> %@</div>", headers[@"x-tt-store-region-src"]];
+        [html appendFormat:@"<div class='header'><span class='label'>rpc-persist-pyxis-policy-v-tnc:</span> %@</div>", headers[@"rpc-persist-pyxis-policy-v-tnc"]];
+        [html appendFormat:@"<div class='header'><span class='label'>x-ss-dp:</span> %@</div>", headers[@"x-ss-dp"]];
+        [html appendFormat:@"<div class='header'><span class='label'>x-tt-trace-id:</span> %@</div>", headers[@"x-tt-trace-id"]];
+        [html appendFormat:@"<div class='header'><span class='label'>accept-encoding:</span> %@</div>", headers[@"accept-encoding"]];
 
         NSString *ladon = headers[@"x-ladon"];
         if (ladon.length > 100) {
             [html appendFormat:@"<div class='header'><span class='label'>x-ladon:</span> %@...</div>", [ladon substringToIndex:100]];
         } else {
             [html appendFormat:@"<div class='header'><span class='label'>x-ladon:</span> %@</div>", ladon];
+        }
+
+        NSString *cookie = headers[@"cookie"];
+        if (cookie.length > 100) {
+            [html appendFormat:@"<div class='header'><span class='label'>cookie:</span> %@...</div>", [cookie substringToIndex:100]];
+        } else {
+            [html appendFormat:@"<div class='header'><span class='label'>cookie:</span> %@</div>", cookie];
         }
 
         // Show raw dump in details tag
