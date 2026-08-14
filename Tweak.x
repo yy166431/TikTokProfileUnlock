@@ -10,6 +10,8 @@
 static NSMutableArray *capturedData = nil;
 static CFSocketRef serverSocket = NULL;
 static int captureCount = 0;
+static UIButton *floatingButton = nil;
+static UIWindow *dataWindow = nil;
 
 // ==================== 简易 HTTP 服务器 ====================
 
@@ -103,6 +105,158 @@ static void setupLocalServer() {
     CFRelease(source);
 
     NSLog(@"[TKCapture] ✓ Server running on http://localhost:%d", HTTP_PORT);
+}
+
+// ==================== 悬浮窗 ====================
+
+static void createFloatingButton() {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (floatingButton) return;
+
+        // 获取 keyWindow
+        UIWindow *keyWindow = nil;
+        for (UIWindow *window in [[UIApplication sharedApplication] windows]) {
+            if (window.isKeyWindow) {
+                keyWindow = window;
+                break;
+            }
+        }
+        if (!keyWindow) keyWindow = [[[UIApplication sharedApplication] windows] firstObject];
+        if (!keyWindow) return;
+
+        // 创建悬浮按钮
+        floatingButton = [UIButton buttonWithType:UIButtonTypeCustom];
+        floatingButton.frame = CGRectMake([UIScreen mainScreen].bounds.size.width - 70, 100, 60, 60);
+        floatingButton.backgroundColor = [[UIColor redColor] colorWithAlphaComponent:0.8];
+        floatingButton.layer.cornerRadius = 30;
+        floatingButton.layer.masksToBounds = YES;
+        [floatingButton setTitle:[NSString stringWithFormat:@"%d", (int)capturedData.count] forState:UIControlStateNormal];
+        floatingButton.titleLabel.font = [UIFont boldSystemFontOfSize:20];
+        [floatingButton addTarget:floatingButton action:@selector(onButtonTap) forControlEvents:UIControlEventTouchUpInside];
+
+        // 添加拖动手势
+        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:floatingButton action:@selector(handlePan:)];
+        [floatingButton addGestureRecognizer:pan];
+
+        [keyWindow addSubview:floatingButton];
+
+        // 定时更新数字
+        [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *timer) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [floatingButton setTitle:[NSString stringWithFormat:@"%d", (int)capturedData.count] forState:UIControlStateNormal];
+            });
+        }];
+
+        NSLog(@"[TKCapture] ✓ Floating button created");
+    });
+}
+
+// 按钮点击
+%new
+- (void)onButtonTap {
+    // 显示数据窗口
+    showDataWindow();
+}
+
+// 拖动手势
+%new
+- (void)handlePan:(UIPanGestureRecognizer *)gesture {
+    UIView *button = gesture.view;
+    CGPoint translation = [gesture translationInView:button.superview];
+
+    button.center = CGPointMake(button.center.x + translation.x, button.center.y + translation.y);
+    [gesture setTranslation:CGPointZero inView:button.superview];
+
+    if (gesture.state == UIGestureRecognizerStateEnded) {
+        // 自动吸边
+        CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
+        CGFloat newX = button.center.x < screenWidth / 2 ? 30 : screenWidth - 30;
+
+        [UIView animateWithDuration:0.3 animations:^{
+            button.center = CGPointMake(newX, button.center.y);
+        }];
+    }
+}
+
+static void showDataWindow() {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (dataWindow) {
+            [dataWindow removeFromSuperview];
+            dataWindow = nil;
+            return;
+        }
+
+        // 创建数据显示窗口
+        CGRect frame = [UIScreen mainScreen].bounds;
+        dataWindow = [[UIWindow alloc] initWithFrame:frame];
+        dataWindow.windowLevel = UIWindowLevelAlert + 1;
+        dataWindow.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.95];
+
+        // 创建文本视图
+        UITextView *textView = [[UITextView alloc] initWithFrame:CGRectMake(10, 50, frame.size.width - 20, frame.size.height - 100)];
+        textView.backgroundColor = [UIColor clearColor];
+        textView.textColor = [UIColor greenColor];
+        textView.font = [UIFont systemFontOfSize:12];
+        textView.editable = NO;
+
+        // 生成显示内容
+        NSMutableString *content = [NSMutableString new];
+        [content appendFormat:@"TikTok Profile Capture\n捕获数量: %d\n\n", (int)capturedData.count];
+
+        for (NSDictionary *item in [capturedData reverseObjectEnumerator]) {
+            [content appendFormat:@"=== ID: %@ ===\n", item[@"id"]];
+            [content appendFormat:@"类型: %@\n", item[@"type"]];
+
+            if (item[@"url"]) {
+                [content appendFormat:@"URL: %@\n", item[@"url"]];
+            }
+            if (item[@"method"]) {
+                [content appendFormat:@"方法: %@\n", item[@"method"]];
+            }
+            if (item[@"headers"] && [item[@"headers"] count] > 0) {
+                [content appendFormat:@"请求头: %@\n", item[@"headers"]];
+            }
+            if (item[@"body"] && [item[@"body"] length] > 0) {
+                [content appendFormat:@"请求体: %@\n", item[@"body"]];
+            }
+            if (item[@"response"]) {
+                NSString *resp = item[@"response"];
+                if ([resp length] > 500) {
+                    [content appendFormat:@"响应: %@...\n", [resp substringToIndex:500]];
+                } else {
+                    [content appendFormat:@"响应: %@\n", resp];
+                }
+            }
+            [content appendString:@"\n"];
+        }
+
+        if (capturedData.count == 0) {
+            [content appendString:@"暂无数据，请刷新个人主页"];
+        }
+
+        textView.text = content;
+        [dataWindow addSubview:textView];
+
+        // 关闭按钮
+        UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+        closeBtn.frame = CGRectMake(frame.size.width - 70, 10, 60, 30);
+        [closeBtn setTitle:@"关闭" forState:UIControlStateNormal];
+        [closeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        [closeBtn addTarget:nil action:@selector(closeDataWindow) forControlEvents:UIControlEventTouchUpInside];
+        [dataWindow addSubview:closeBtn];
+
+        [dataWindow makeKeyAndVisible];
+    });
+}
+
+%new
++ (void)closeDataWindow {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (dataWindow) {
+            [dataWindow removeFromSuperview];
+            dataWindow = nil;
+        }
+    });
 }
 
 // ==================== Hook NSJSONSerialization ====================
@@ -322,6 +476,85 @@ static void setupLocalServer() {
 
 // ==================== 构造函数 ====================
 
+// ==================== Hook TTHttpTask ====================
+
+%hook TTHttpTask
+
+- (void)start {
+    @try {
+        if ([self respondsToSelector:@selector(request)]) {
+            id request = [self performSelector:@selector(request)];
+
+            if (request && [request respondsToSelector:@selector(URL)]) {
+                NSURL *url = [request performSelector:@selector(URL)];
+
+                if (url) {
+                    NSString *urlStr = [url absoluteString];
+
+                    if ([urlStr containsString:@"profile"] || [urlStr containsString:@"self"]) {
+                        captureCount++;
+
+                        NSMutableDictionary *capture = [NSMutableDictionary new];
+                        capture[@"id"] = @(captureCount);
+                        capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
+                        capture[@"type"] = @"request_tttask";
+                        capture[@"url"] = urlStr;
+
+                        if ([request respondsToSelector:@selector(HTTPMethod)]) {
+                            capture[@"method"] = [request performSelector:@selector(HTTPMethod)] ?: @"GET";
+                        }
+                        if ([request respondsToSelector:@selector(allHTTPHeaderFields)]) {
+                            capture[@"headers"] = [request performSelector:@selector(allHTTPHeaderFields)] ?: @{};
+                        }
+
+                        [capturedData addObject:capture];
+                        NSLog(@"[TKCapture] ★ TTHttpTask #%d: %@", captureCount, urlStr);
+                    }
+                }
+            }
+        }
+    } @catch (NSException *e) {
+        NSLog(@"[TKCapture] Exception in TTHttpTask hook: %@", e);
+    }
+
+    %orig;
+}
+
+%end
+
+// ==================== Hook NSURL initWithString ====================
+
+%hook NSURL
+
+- (instancetype)initWithString:(NSString *)URLString {
+    id result = %orig;
+
+    if (URLString && ([URLString containsString:@"profile"] || [URLString containsString:@"self"])
+        && [URLString containsString:@"tiktok"]) {
+
+        captureCount++;
+
+        NSMutableDictionary *capture = [NSMutableDictionary new];
+        capture[@"id"] = @(captureCount);
+        capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
+        capture[@"type"] = @"url_init";
+        capture[@"url"] = URLString;
+
+        // 获取调用栈
+        NSArray *callStack = [NSThread callStackSymbols];
+        if (callStack.count > 2) {
+            capture[@"caller"] = callStack[2];
+        }
+
+        [capturedData addObject:capture];
+        NSLog(@"[TKCapture] ★ NSURL init: %@", URLString);
+    }
+
+    return result;
+}
+
+%end
+
 __attribute__((constructor))
 static void init() {
     NSLog(@"[TKCapture] ✓ Loaded");
@@ -330,5 +563,6 @@ static void init() {
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         setupLocalServer();
+        createFloatingButton();
     });
 }
