@@ -1,79 +1,108 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
-#import <GCDWebServer/GCDWebServer.h>
-#import <GCDWebServer/GCDWebServerDataResponse.h>
 
 #define HTTP_PORT 9999
-#define LOG_SERVER_URL @"http://159.75.14.193:8899/log"
 
 static NSMutableArray *capturedData = nil;
-static GCDWebServer *webServer = nil;
+static CFSocketRef serverSocket = NULL;
 static int captureCount = 0;
 
-// ==================== HTTP 本地服务 ====================
+// ==================== 简易 HTTP 服务器 ====================
+
+static NSString* generateHTML() {
+    NSMutableString *html = [NSMutableString new];
+    [html appendString:@"<html><head><meta charset='utf-8'><title>TikTok Capture</title>"];
+    [html appendString:@"<style>body{font-family:monospace;padding:20px;background:#1a1a1a;color:#0f0}"];
+    [html appendString:@".item{border:1px solid #0f0;margin:10px 0;padding:10px;background:#000}"];
+    [html appendString:@".url{color:#0ff;word-break:break-all}"];
+    [html appendString:@".json{color:#ff0;white-space:pre-wrap;max-height:300px;overflow:auto}"];
+    [html appendString:@"</style></head><body>"];
+    [html appendFormat:@"<h1>TikTok Profile Capture</h1><p>捕获数量: %d</p>", (int)capturedData.count];
+    [html appendString:@"<div id='list'>"];
+
+    for (NSDictionary *item in [capturedData reverseObjectEnumerator]) {
+        [html appendFormat:@"<div class='item'><b>ID:</b> %@<br><b>URL:</b> <span class='url'>%@</span><br><b>响应:</b><pre class='json'>%@</pre></div>",
+            item[@"id"], item[@"url"] ?: @"N/A", item[@"response"] ?: @"N/A"];
+    }
+
+    if (capturedData.count == 0) {
+        [html appendString:@"<p>暂无数据，请刷新个人主页</p>"];
+    }
+
+    [html appendString:@"</div><script>setTimeout(()=>location.reload(),3000)</script></body></html>"];
+    return html;
+}
+
+static void handleConnection(CFSocketRef socket, CFSocketCallBackType type, CFDataRef address, const void *data, void *info) {
+    if (type != kCFSocketAcceptCallBack) return;
+
+    CFSocketNativeHandle clientSocket = *(CFSocketNativeHandle *)data;
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        char buffer[1024];
+        recv(clientSocket, buffer, sizeof(buffer), 0);
+
+        NSString *html = generateHTML();
+        NSData *htmlData = [html dataUsingEncoding:NSUTF8StringEncoding];
+
+        NSString *response = [NSString stringWithFormat:
+            @"HTTP/1.1 200 OK\r\n"
+            @"Content-Type: text/html; charset=utf-8\r\n"
+            @"Content-Length: %lu\r\n"
+            @"Connection: close\r\n\r\n",
+            (unsigned long)htmlData.length];
+
+        send(clientSocket, [response UTF8String], [response length], 0);
+        send(clientSocket, [htmlData bytes], [htmlData length], 0);
+        close(clientSocket);
+    });
+}
 
 static void setupLocalServer() {
-    if (webServer) return;
+    if (serverSocket) return;
 
     capturedData = [NSMutableArray new];
-    webServer = [[GCDWebServer alloc] init];
 
-    // GET / - 主页
-    [webServer addDefaultHandlerForMethod:@"GET"
-        requestClass:[GCDWebServerRequest class]
-        processBlock:^GCDWebServerResponse *(GCDWebServerRequest *request) {
-            NSMutableString *html = [NSMutableString new];
-            [html appendString:@"<html><head><meta charset='utf-8'><title>TikTok Capture</title>"];
-            [html appendString:@"<style>body{font-family:monospace;padding:20px;background:#1a1a1a;color:#0f0}"];
-            [html appendString:@".item{border:1px solid #0f0;margin:10px 0;padding:10px;background:#000}"];
-            [html appendString:@".url{color:#0ff;word-break:break-all}"];
-            [html appendString:@".json{color:#ff0;white-space:pre-wrap;max-height:300px;overflow:auto}"];
-            [html appendString:@"</style></head><body>"];
-            [html appendFormat:@"<h1>TikTok Profile Capture</h1><p>捕获数量: %d</p>", (int)capturedData.count];
-            [html appendString:@"<div id='list'>"];
+    CFSocketContext context = {0, NULL, NULL, NULL, NULL};
+    serverSocket = CFSocketCreate(kCFAllocatorDefault, PF_INET, SOCK_STREAM, IPPROTO_TCP,
+        kCFSocketAcceptCallBack, handleConnection, &context);
 
-            for (NSDictionary *item in [capturedData reverseObjectEnumerator]) {
-                [html appendFormat:@"<div class='item'><b>ID:</b> %@<br><b>URL:</b> <span class='url'>%@</span><br><b>响应:</b><pre class='json'>%@</pre></div>",
-                    item[@"id"], item[@"url"] ?: @"N/A", item[@"response"] ?: @"N/A"];
-            }
+    if (!serverSocket) {
+        NSLog(@"[TKCapture] ✗ Failed to create socket");
+        return;
+    }
 
-            if (capturedData.count == 0) {
-                [html appendString:@"<p>暂无数据</p>"];
-            }
+    int yes = 1;
+    setsockopt(CFSocketGetNative(serverSocket), SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
 
-            [html appendString:@"</div><script>setInterval(()=>location.reload(),5000)</script></body></html>"];
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_len = sizeof(addr);
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(HTTP_PORT);
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-            return [GCDWebServerDataResponse responseWithHTML:html];
-        }];
+    CFDataRef addressData = CFDataCreate(NULL, (const UInt8 *)&addr, sizeof(addr));
 
-    // GET /api/data - JSON API
-    [webServer addDefaultHandlerForMethod:@"GET"
-        requestClass:[GCDWebServerRequest class]
-        processBlock:^GCDWebServerResponse *(GCDWebServerRequest *request) {
-            NSData *jsonData = [NSJSONSerialization dataWithJSONObject:capturedData
-                options:NSJSONWritingPrettyPrinted error:nil];
-            return [GCDWebServerDataResponse responseWithData:jsonData contentType:@"application/json"];
-        }];
+    if (CFSocketSetAddress(serverSocket, addressData) != kCFSocketSuccess) {
+        CFRelease(serverSocket);
+        CFRelease(addressData);
+        serverSocket = NULL;
+        NSLog(@"[TKCapture] ✗ Failed to bind to port %d", HTTP_PORT);
+        return;
+    }
 
-    [webServer startWithPort:HTTP_PORT bonjourName:nil];
+    CFRelease(addressData);
+
+    CFRunLoopSourceRef source = CFSocketCreateRunLoopSource(kCFAllocatorDefault, serverSocket, 0);
+    CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
+    CFRelease(source);
+
     NSLog(@"[TKCapture] ✓ Server running on http://localhost:%d", HTTP_PORT);
 }
 
 // ==================== Hook NSJSONSerialization ====================
-
-static void uploadToServer(NSDictionary *data) {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        @try {
-            NSURL *url = [NSURL URLWithString:LOG_SERVER_URL];
-            NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
-            req.HTTPMethod = @"POST";
-            [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-            req.HTTPBody = [NSJSONSerialization dataWithJSONObject:data options:0 error:nil];
-            [[[NSURLSession sharedSession] dataTaskWithRequest:req] resume];
-        } @catch (NSException *e) {}
-    });
-}
 
 %hook NSJSONSerialization
 
@@ -95,7 +124,6 @@ static void uploadToServer(NSDictionary *data) {
                 capture[@"response"] = jsonStr;
 
                 [capturedData addObject:capture];
-                uploadToServer(capture);
 
                 NSLog(@"[TKCapture] ★★★ Captured #%d (size: %lu)",
                     captureCount, (unsigned long)data.length);

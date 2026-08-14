@@ -14,17 +14,11 @@ jobs:
 
     - name: Setup Theos
       run: |
-        git clone --recursive https://github.com/theos/theos.git $THEOS
+        sudo git clone --recursive https://github.com/theos/theos.git /opt/theos
+        sudo chown -R $(whoami):staff /opt/theos
         curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_macosx_x86_64
         chmod +x ldid_macosx_x86_64
         sudo mv ldid_macosx_x86_64 /usr/local/bin/ldid
-      env:
-        THEOS: /opt/theos
-
-    - name: Install GCDWebServer
-      run: |
-        git clone https://github.com/swisspol/GCDWebServer.git
-        sudo cp -r GCDWebServer/GCDWebServer $THEOS/include/
 
     - name: Build dylib
       run: |
