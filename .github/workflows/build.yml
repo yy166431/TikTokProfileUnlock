@@ -34,9 +34,10 @@ jobs:
         export THEOS=./theos
         make clean
         make
+        find .theos -name "*.dylib" -type f
 
     - name: Upload dylib
       uses: actions/upload-artifact@v4
       with:
         name: TikTokHeadersCapture
-        path: .theos/obj/TikTokHeadersCapture.dylib
+        path: .theos/obj/**/*.dylib
