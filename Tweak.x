@@ -67,11 +67,11 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
 
         if (!x26_ptr) return result;
 
-        // Read x26 memory safely
+        // Read x26 memory safely - increased buffer size for complete capture
         NSString *raw = nil;
         @try {
             const char *data = (const char *)x26_ptr;
-            raw = [[NSString alloc] initWithBytes:data length:1200 encoding:NSUTF8StringEncoding];
+            raw = [[NSString alloc] initWithBytes:data length:4096 encoding:NSUTF8StringEncoding];
         } @catch (NSException *e) {
             return result;
         }
