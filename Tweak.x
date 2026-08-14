@@ -21,6 +21,8 @@ static UIWindow *dataWindow = nil;
 
 // Original memcmp
 static int (*original_memcmp)(const void *, const void *, size_t);
+static int (*original_bcmp)(const void *, const void *, size_t);
+static int (*original_strcmp)(const char *, const char *);
 
 // Enhanced header extraction - handles both key:value and keyvalue formats
 static NSString* extractHeader(NSString *raw, NSString *key) {
@@ -70,6 +72,43 @@ static NSString* extractHeader(NSString *raw, NSString *key) {
     return value;
 }
 
+// Hooked bcmp - additional hook for A10 compatibility
+static int hooked_bcmp(const void *s1, const void *s2, size_t n) {
+    int result = original_bcmp(s1, s2, n);
+
+    if (result != 0 || n != 8) return result;
+
+    @autoreleasepool {
+        char str1[9] = {0}, str2[9] = {0};
+        memcpy(str1, s1, 8);
+        memcpy(str2, s2, 8);
+
+        if (strcmp(str1, "x-gorgon") != 0 && strcmp(str2, "x-gorgon") != 0) {
+            return result;
+        }
+
+        NSLog(@"[TikTokHeaders] bcmp hit x-gorgon!");
+
+        // Call memcmp handler to avoid code duplication
+        return hooked_memcmp(s1, s2, n);
+    }
+}
+
+// Hooked strcmp - additional hook for A10 compatibility
+static int hooked_strcmp(const char *s1, const char *s2) {
+    int result = original_strcmp(s1, s2);
+
+    if (result != 0) return result;
+
+    @autoreleasepool {
+        if (strcmp(s1, "x-gorgon") == 0 || strcmp(s2, "x-gorgon") == 0) {
+            NSLog(@"[TikTokHeaders] strcmp hit x-gorgon!");
+        }
+    }
+
+    return result;
+}
+
 // Hooked memcmp - capture signatures from x26
 static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
     int result = original_memcmp(s1, s2, n);
@@ -84,6 +123,8 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
         if (strcmp(str1, "x-gorgon") != 0 && strcmp(str2, "x-gorgon") != 0) {
             return result;
         }
+
+        NSLog(@"[TikTokHeaders] memcmp hit x-gorgon!");
 
         // Get x26 register via inline assembly
         void *x26_ptr = NULL;
@@ -475,12 +516,19 @@ __attribute__((unused)) static void handlePan(UIPanGestureRecognizer *gesture) {
     @autoreleasepool {
         capturedData = [NSMutableArray new];
 
-        NSLog(@"[TikTokHeaders] dylib loaded - memcmp hook mode");
+        NSLog(@"[TikTokHeaders] dylib loaded - multi-hook mode for A10 compatibility");
 
         // Hook memcmp
         MSHookFunction((void *)memcmp, (void *)hooked_memcmp, (void **)&original_memcmp);
+        NSLog(@"[TikTokHeaders] memcmp hooked");
 
-        NSLog(@"[TikTokHeaders] memcmp hooked successfully");
+        // Hook bcmp for A10 compatibility
+        MSHookFunction((void *)bcmp, (void *)hooked_bcmp, (void **)&original_bcmp);
+        NSLog(@"[TikTokHeaders] bcmp hooked");
+
+        // Hook strcmp for debugging
+        MSHookFunction((void *)strcmp, (void *)hooked_strcmp, (void **)&original_strcmp);
+        NSLog(@"[TikTokHeaders] strcmp hooked");
 
         // Start HTTP server
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
