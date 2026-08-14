@@ -17,6 +17,18 @@ static UIWindow *dataWindow = nil;
 // Key: 线程ID, Value: @{url, headers, timestamp}
 static NSMutableDictionary *pendingRequests = nil;
 
+// 接口声明
+@interface TTHttpTask : NSObject
+- (NSURLRequest *)request;
+- (void)resume;
+- (void)readDataOfMinLength:(NSUInteger)minBytes maxLength:(NSUInteger)maxBytes timeout:(NSTimeInterval)timeout completionHandler:(void (^)(NSData *data, BOOL atEOF, NSError *error))completionHandler;
+@end
+
+@interface TTHttpResponseChromium : NSObject
+- (NSURL *)URL;
+- (NSDictionary *)allHeaderFields;
+@end
+
 // 前置声明
 static void showDataWindow();
 static void closeDataWindow();
