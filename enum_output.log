@@ -1,0 +1,20 @@
+     ____
+    / _  |   Frida 16.5.9 - A world-class dynamic instrumentation toolkit
+   | (_| |
+    > _  |   Commands:
+   /_/ |_|       help      -> Displays the help system
+   . . . .       object?   -> Display information about 'object'
+   . . . .       exit/quit -> Exit
+   . . . .
+   . . . .   More info at https://frida.re/docs/home/
+   . . . .
+   . . . .   Connected to 192.168.9.102 (id=socket@192.168.9.102)
+Attaching...
+[*] 开始枚举所有运行时对象...
+Error: access violation accessing 0x0
+    at choose (frida/node_modules/frida-objc-bridge/lib/fastpaths.js:18)
+    at choose (frida/node_modules/frida-objc-bridge/index.js:1026)
+    at <eval> (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\enum_all_objects.js:50)
+[Remote::TikTok ]-> Process terminated
+
+Thank you for using Frida!

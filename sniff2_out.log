@@ -1,0 +1,10 @@
+[+] attach pid=891
+[hook] - tspk_requestForJSONWithURL_:params:method:needCommonParams:headerField:requestSerializer:responseSerializer:autoResume:verifyRequest:isCustomizedCookie:callback:callbackWithResponse:dispatch_queue:
+[hook] - tspk_requestForBinaryWithURL_:params:method:needCommonParams:headerField:enableHttpCache:requestSerializer:responseSerializer:autoResume:isCustomizedCookie:headerCallback:dataCallback:callback:callbackWithResponse:redire[*] 结束
+:progress:dispatch_queue:
+[hook] - tspk_requestForWebviewCommon:mainDocURL:autoResume:enableHttpCache:headerCallback:dataCallback:callbackWithResponse:redirectCallback:
+[hook] - tspk_synchronizedRequstForURL:method:headerField:jsonObjParams:needCommonParams:requestSerializer:needResponse:needEncrypt:needContentEncodingAfterEncrypt:
+[hook] - bdxbridge_requestWithURL:method:params:callback:
+[hook] - requestWithURL:method:params:callback:
+[READY] 精准hook 6 个入口, 现在点"我"进个人主页, 盯 [PROFILE]
+[*] 结束

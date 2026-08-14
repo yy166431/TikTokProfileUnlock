@@ -1,0 +1,4 @@
+[+] attach pid=1006
+[target] - handleResponsePreProcessing_:data:error:request:preprocessor:headerCallback:dataCallback:completedCallback:
+[OK] hooked, 现在点个人主页/下拉刷新, 盯 ★PROFILE/SELF★
+[*] 结束(不detach, 保护进程)

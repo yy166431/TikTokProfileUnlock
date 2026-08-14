@@ -1,0 +1,43 @@
+=== INFO ===
+[TKCap] ✅ 抓包插件已加载, 端口9999
+[TKCap] ✅ HTTP服务器启动 http://设备IP:9999
+[TKCap] 悬浮窗已创建
+[TKCap] 悬浮窗已创建
+[TKCap] ✅ HTTP服务器启动 http://设备IP:9999
+[TKCap] ✅ 抓包插件已加载, 端口9999
+[TKCap] ✅ 抓包插件已加载, 端口9999
+[TKCap] ✅ HTTP服务器启动 http://设备IP:9999
+[TKCap] 悬浮窗已创建(穿透窗)
+[TKCap] ✅ 抓包插件已加载, 端口9999
+[TKCap] 悬浮窗已创建(穿透窗)
+[TKCap] ✅ HTTP服务器启动 http://设备IP:9999
+[TKCap] ✅ 抓包插件已加载, 端口9999
+[TKCap] ✅ HTTP服务器启动 http://设备IP:9999
+[TKCap] 悬浮窗已创建(穿透窗)
+
+=== RECV前25条RESP开头 ===
+'len=2325\n[hex head 512]\n0b00 0910 0000 090c 0004 9630 8204 9230 8204 38a0 0302 0102 0210 0'
+'len=2325\n[hex head 512]\n0b00 0910 0000 090c 0004 9630 8204 9230 8204 38a0 0302 0102 0210 0'
+'len=4033\n[hex head 512]\n0800 000f 000d 0000 0000 0010 0005 0003 0268 320b 000e 7d00 000e 7'
+'len=675\n[hex head 512]\n0002 9900 0100 0000 193c 6120 6872 6566 3d22 2f74 696b 746f 6b2f 61'
+'len=3714\n[hex head 512]\n0b00 0e7d 0000 0e79 0006 2130 8206 1d30 8205 05a0 0302 0102 0210 0'
+'len=3723\n[hex head 512]\n0b00 0e86 0000 0e82 0006 2a30 8206 2630 8205 0ea0 0302 0102 0210 0'
+'len=4033\n[hex head 512]\n0800 000f 000d 0000 0000 0010 0005 0003 0268 320b 000e 7d00 000e 7'
+'len=4033\n[hex head 512]\n0800 000f 000d 0000 0000 0010 0005 0003 0268 320b 000e 7d00 000e 7'
+'len=2324\n[hex head 512]\n0b00 090f 0000 090b 0004 9630 8204 9230 8204 38a0 0302 0102 0210 0'
+'len=3723\n[hex head 512]\n0b00 0e86 0000 0e82 0006 2a30 8206 2630 8205 0ea0 0302 0102 0210 0'
+'moderator&starling_fallback=1&starling_channel=3588__53523","live_precise_exposure_server_'
+'all":0,"ttlive_audience_enter_room_all":0,"livesdk_enter_room_retry":0,"livesdk_game_audie'
+'upon\\"},\\"anim_type\\":{\\"1\\":\\"Marquee\\",\\"2\\":\\"Expand\\",\\"0\\":\\"Unknown\\",\\"3\\":\\"Highli'
+'pp/inapp/age-verification/dob.html?use_spark=1&hide_nav_bar=1&show_loading=1&should_full_s'
+'//lf16-campaign.ttlstatic.com/obj/ttlive-campaign-sg/ies/resource/falcon/","https://cdn-to'
+'/sf19-scmcdn-sg.ibytedtos.com/goofy/ies/resource/falcon/","https://sf16-scmcdn-gcp.ibytedt'
+'nchor_enable":0,"tt_live_PB_reqeust_add_metrics_callback":true,"live_tools_sort":[1,2,12,1'
+'byte-gurd-source-sg/tiktok-m/live/fe/","https://lf16-tiktok-web.ttwstatic.com/obj/tiktok-w'
+'sg/tiktok/fe/live/","https://lf16-gecko-source.tiktokcdn.com/obj/byte-gurd-source-sg/music'
+'/va/gecko/","https://sf16-website.neutral.ttwstatic.com/obj/tiktok_web_static/ies/resource'
+'\x00@\x00\x00\x00\x00\x00\x00\rcdn.com/obj/byte-gurd-source-sg/gne/fe/creator/","https://lf16-campaign.ttlstatic'
+'0 0 -1.3 1.3c -0.05 0.1 -0.17 0.38 -0.25 1.3C 6 14.9 6 16.17 6 18.2v 11.6c 0 2.03 0 3.3 0.'
+'y-va/ies/resource/falcon/","https://lf16-fdm.ifdmstatic.com/obj/goofy-va/ies/resource/falc'
+'iktokcdn.com%2Fobj%2Fbyte-gurd-source-sg%2Fmusically%2Ffe%2Flive%2Ftiktok_live_revenue_low'
+'{\\"dynamic\\":true,\\"path\\":\\"data.hasArrow\\"},\\"operator\\":\\"===\\",\\"right\\":true}]}],\\"ch'

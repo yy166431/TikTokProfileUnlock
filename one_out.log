@@ -1,0 +1,6 @@
+[+] attach pid=985
+[target] - handleUpperLayerCallback:dispatchQueue:requestUrl:
+[OK] hooked 1 method, 现在刷抖音+点个人主页
+[url] https://log-va.tiktokv.com/service/2/app_log/
+[!!!] DETACHED: process-terminated
+[*] 结束

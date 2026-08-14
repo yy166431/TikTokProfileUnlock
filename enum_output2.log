@@ -1,0 +1,141 @@
+     ____
+    / _  |   Frida 16.5.9 - A world-class dynamic instrumentation toolkit
+   | (_| |
+    > _  |   Commands:
+   /_/ |_|       help      -> Displays the help system
+   . . . .       object?   -> Display information about 'object'
+   . . . .       exit/quit -> Exit
+   . . . .
+   . . . .   More info at https://frida.re/docs/home/
+   . . . .
+   . . . .   Connected to 192.168.9.102 (id=socket@192.168.9.102)
+Attaching...
+[*] Bypassing anti-debug checks...
+[+] Hooked sysctl
+[+] Hooked ptrace
+[+] Hooked getppid
+[*] Anti-debug bypass complete. Loading main script...
+
+[*] 开始枚举所有运行时对象...
+Failed to load script: timeout was reached
+Error: access violation accessing 0xe00000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+    at CModule (native)
+    at _ (frida/node_modules/frida-objc-bridge/lib/fastpaths.js:14)
+    at get (/_objc.js)
+    at choose (frida/node_modules/frida-objc-bridge/index.js:1026)
+    at <eval> (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:99)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+Error: access violation accessing 0x1500000001
+    at <anonymous> (frida/runtime/core.js:145)
+    at onLeave (C:\Users\Administrator\Desktop\TK\TikTokProfileUnlock\combined_hook.js:16)
+
+Thank you for using Frida!
