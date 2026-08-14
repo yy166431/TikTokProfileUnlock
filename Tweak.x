@@ -309,9 +309,16 @@ static void createFloatingButton() {
     if (floatingButton) return;
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
-        if (!keyWindow) {
-            keyWindow = [[UIApplication sharedApplication].windows firstObject];
+        UIWindow *keyWindow = nil;
+        NSArray *windows = [UIApplication sharedApplication].windows;
+        for (UIWindow *window in windows) {
+            if (window.isKeyWindow) {
+                keyWindow = window;
+                break;
+            }
+        }
+        if (!keyWindow && windows.count > 0) {
+            keyWindow = windows.firstObject;
         }
         if (!keyWindow) return;
 
