@@ -59,17 +59,42 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
 
         captureCount++;
 
-        // Parse headers and URL from raw data
+        // Parse headers and URL from raw data - improved parsing
         NSString *argus = @"", *gorgon = @"", *khronos = @"", *ladon = @"", *query = @"";
+
+        // Extract x-argus (format: x-argus=VALUE or x-argus: VALUE)
+        NSRange argusRange = [raw rangeOfString:@"x-argus"];
+        if (argusRange.location != NSNotFound) {
+            NSInteger start = argusRange.location + 7; // skip "x-argus"
+            // Skip '=' or ':' and spaces
+            while (start < raw.length) {
+                unichar ch = [raw characterAtIndex:start];
+                if (ch != '=' && ch != ':' && ch != ' ') break;
+                start++;
+            }
+            NSString *sub = [raw substringFromIndex:start];
+            // Find next 'x-' header
+            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^([^x]+?)(?=x-[a-z])" options:0 error:nil];
+            NSTextCheckingResult *match = [regex firstMatchInString:sub options:0 range:NSMakeRange(0, MIN(2000, sub.length))];
+            if (match && match.range.location != NSNotFound) {
+                argus = [[sub substringWithRange:[match rangeAtIndex:1]] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            }
+        }
 
         // Extract x-gorgon
         NSRange gorgonRange = [raw rangeOfString:@"x-gorgon"];
         if (gorgonRange.location != NSNotFound) {
-            NSInteger start = gorgonRange.location + 8; // skip "x-gorgon"
+            NSInteger start = gorgonRange.location + 8;
+            while (start < raw.length) {
+                unichar ch = [raw characterAtIndex:start];
+                if (ch != '=' && ch != ':' && ch != ' ') break;
+                start++;
+            }
             NSString *sub = [raw substringFromIndex:start];
-            NSRange nextHeader = [sub rangeOfString:@"x-"];
-            if (nextHeader.location != NSNotFound) {
-                gorgon = [[sub substringToIndex:nextHeader.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^([0-9a-f]{40,})(?=x-)" options:0 error:nil];
+            NSTextCheckingResult *match = [regex firstMatchInString:sub options:0 range:NSMakeRange(0, MIN(100, sub.length))];
+            if (match) {
+                gorgon = [sub substringWithRange:[match rangeAtIndex:1]];
             }
         }
 
@@ -77,10 +102,16 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
         NSRange khronosRange = [raw rangeOfString:@"x-khronos"];
         if (khronosRange.location != NSNotFound) {
             NSInteger start = khronosRange.location + 9;
+            while (start < raw.length) {
+                unichar ch = [raw characterAtIndex:start];
+                if (ch != '=' && ch != ':' && ch != ' ') break;
+                start++;
+            }
             NSString *sub = [raw substringFromIndex:start];
-            NSRange nextHeader = [sub rangeOfString:@"x-"];
-            if (nextHeader.location != NSNotFound) {
-                khronos = [[sub substringToIndex:nextHeader.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^(\\d{10,})(?=x-)" options:0 error:nil];
+            NSTextCheckingResult *match = [regex firstMatchInString:sub options:0 range:NSMakeRange(0, MIN(50, sub.length))];
+            if (match) {
+                khronos = [sub substringWithRange:[match rangeAtIndex:1]];
             }
         }
 
@@ -88,21 +119,16 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
         NSRange ladonRange = [raw rangeOfString:@"x-ladon"];
         if (ladonRange.location != NSNotFound) {
             NSInteger start = ladonRange.location + 7;
-            NSString *sub = [raw substringFromIndex:start];
-            NSRange nextHeader = [sub rangeOfString:@"x-"];
-            if (nextHeader.location != NSNotFound) {
-                ladon = [[sub substringToIndex:nextHeader.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            while (start < raw.length) {
+                unichar ch = [raw characterAtIndex:start];
+                if (ch != '=' && ch != ':' && ch != ' ') break;
+                start++;
             }
-        }
-
-        // Extract x-argus
-        NSRange argusRange = [raw rangeOfString:@"x-argus"];
-        if (argusRange.location != NSNotFound) {
-            NSInteger start = argusRange.location + 7;
             NSString *sub = [raw substringFromIndex:start];
-            NSRange nextHeader = [sub rangeOfString:@"x-"];
-            if (nextHeader.location != NSNotFound) {
-                argus = [[sub substringToIndex:nextHeader.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^([A-Za-z0-9+/=_-]{50,})(?=x-)" options:0 error:nil];
+            NSTextCheckingResult *match = [regex firstMatchInString:sub options:0 range:NSMakeRange(0, MIN(1500, sub.length))];
+            if (match) {
+                ladon = [sub substringWithRange:[match rangeAtIndex:1]];
             }
         }
 
@@ -110,9 +136,10 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
         NSRange musicalRange = [raw rangeOfString:@"musical_ly"];
         if (musicalRange.location != NSNotFound) {
             NSString *qStr = [raw substringFromIndex:musicalRange.location];
-            NSRange contentLength = [qStr rangeOfString:@"content-length"];
-            if (contentLength.location != NSNotFound) {
-                query = [[qStr substringToIndex:contentLength.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^([a-zA-Z0-9&=_\\-%.]+)" options:0 error:nil];
+            NSTextCheckingResult *match = [regex firstMatchInString:qStr options:0 range:NSMakeRange(0, MIN(2000, qStr.length))];
+            if (match) {
+                query = [qStr substringWithRange:[match rangeAtIndex:1]];
             }
         }
 
