@@ -596,13 +596,13 @@ static void closeDataWindow() {
             capture[@"method"] = @"GET";  // profile/self/v1 是 GET 请求
 
             // 尝试从 pendingRequests 获取之前保存的请求头
-            NSString *threadId = [NSString stringWithFormat:@"%p", [NSThread currentThread]];
-            NSDictionary *pendingReq = pendingRequests[threadId];
+            NSDictionary *pendingReq = pendingRequests[urlStr];
             if (pendingReq && [pendingReq[@"url"] isEqualToString:urlStr]) {
-                capture[@"request_headers"] = pendingReq[@"headers"] ?: @{};
-                [pendingRequests removeObjectForKey:threadId];
-                NSLog(@"[TKCapture] ✓ Found request headers from pending cache");
+                capture[@"request_headers"] = pendingReq[@"request_headers"] ?: @{};
+                NSLog(@"[TKCapture] ✓ Found request headers from TTHttpTask: %lu headers", (unsigned long)[capture[@"request_headers"] count]);
             } else {
+                NSLog(@"[TKCapture] ✗ No request headers in pending cache for URL");
+
                 // 尝试通过反射获取请求头
                 @try {
                     unsigned int ivarCount = 0;
@@ -697,12 +697,11 @@ static void closeDataWindow() {
                     capture[@"request_headers"] = headers;
                 }
 
-                // 保存到 pendingRequests，用任务地址作为 key
-                NSString *taskKey = [NSString stringWithFormat:@"%p", self];
+                // 保存到 pendingRequests，用 URL 作为 key 方便响应时关联
                 if (!pendingRequests) {
                     pendingRequests = [NSMutableDictionary new];
                 }
-                pendingRequests[taskKey] = capture;
+                pendingRequests[urlStr] = capture;
 
                 NSLog(@"[TKCapture] ★★★ Request #%d", captureCount);
                 NSLog(@"[TKCapture]   URL: %@", urlStr);
@@ -727,37 +726,45 @@ static void closeDataWindow() {
 
         @try {
             if (data && data.length > 0) {
-                NSString *taskKey = [NSString stringWithFormat:@"%p", self];
-                NSMutableDictionary *capture = pendingRequests[taskKey];
+                // 获取请求对象来找到 URL
+                NSURLRequest *request = [self request];
+                if (request) {
+                    NSString *urlStr = [[request URL] absoluteString];
+                    NSMutableDictionary *capture = pendingRequests[urlStr];
 
-                if (capture) {
-                    // 尝试解析为字符串
-                    NSString *responseStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+                    if (capture) {
+                        // 尝试解析为字符串
+                        NSString *responseStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
 
-                    if (responseStr) {
-                        // 如果已有响应体，追加
-                        if (capture[@"response_body"]) {
-                            capture[@"response_body"] = [capture[@"response_body"] stringByAppendingString:responseStr];
-                        } else {
-                            capture[@"response_body"] = responseStr;
+                        if (responseStr) {
+                            // 如果已有响应体，追加
+                            if (capture[@"response_body"]) {
+                                capture[@"response_body"] = [capture[@"response_body"] stringByAppendingString:responseStr];
+                            } else {
+                                capture[@"response_body"] = responseStr;
+                            }
+
+                            NSLog(@"[TKCapture] ★★★ Response data: %lu bytes (EOF: %d)", (unsigned long)data.length, atEOF);
                         }
 
-                        NSLog(@"[TKCapture] ★★★ Response data: %lu bytes (EOF: %d)", (unsigned long)data.length, atEOF);
+                        // 如果是最后一块数据，保存完整记录
+                        if (atEOF) {
+                            [capturedData addObject:capture];
+                            [pendingRequests removeObjectForKey:urlStr];
+
+                            // 更新悬浮按钮数字
+                            dispatch_async(dispatch_get_main_queue(), ^{
+                                if (floatingButton) {
+                                    [floatingButton setTitle:[NSString stringWithFormat:@"%d", (int)capturedData.count] forState:UIControlStateNormal];
+                                }
+                            });
+
+                            NSLog(@"[TKCapture] ✓ Complete capture saved (ID: %@)", capture[@"id"]);
+                        }
                     }
-
-                    // 如果是最后一块数据，保存完整记录
-                    if (atEOF) {
-                        [capturedData addObject:capture];
-                        [pendingRequests removeObjectForKey:taskKey];
-
-                        // 更新悬浮按钮数字
-                        dispatch_async(dispatch_get_main_queue(), ^{
-                            if (floatingButton) {
-                                [floatingButton setTitle:[NSString stringWithFormat:@"%d", (int)capturedData.count] forState:UIControlStateNormal];
-                            }
-                        });
-
-                        NSLog(@"[TKCapture] ✓ Complete capture saved (ID: %@)", capture[@"id"]);
+                }
+            }
+        } @catch (NSException *e) {
                     }
                 }
             }
