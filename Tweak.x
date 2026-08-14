@@ -57,9 +57,8 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
             return result;
         }
 
-        // Only capture if both x-tt-token and user-agent exist
-        if ([raw rangeOfString:@"x-tt-token"].location == NSNotFound ||
-            [raw rangeOfString:@"user-agent"].location == NSNotFound) {
+        // Only capture profile/self requests
+        if ([raw rangeOfString:@"profile/self"].location == NSNotFound) {
             return result;
         }
 
