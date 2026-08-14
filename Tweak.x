@@ -12,10 +12,21 @@
 #define HTTP_PORT 8888
 
 static NSMutableArray *capturedData = nil;
+static NSMutableArray *debugLogs = nil;
 static CFSocketRef serverSocket = NULL;
 static int captureCount = 0;
 static UIButton *floatingButton = nil;
 static UIWindow *dataWindow = nil;
+
+// Helper to add debug log
+static void addDebugLog(NSString *message) {
+    if (!debugLogs) {
+        debugLogs = [NSMutableArray new];
+    }
+    NSString *timestamp = [[NSDate date] description];
+    [debugLogs addObject:[NSString stringWithFormat:@"[%@] %@", timestamp, message]];
+    NSLog(@"[TikTokHeaders] %@", message);
+}
 
 // ==================== memcmp Hook ====================
 
@@ -87,7 +98,7 @@ static int hooked_bcmp(const void *s1, const void *s2, size_t n) {
             return result;
         }
 
-        NSLog(@"[TikTokHeaders] bcmp hit x-gorgon!");
+        addDebugLog(@"bcmp hit x-gorgon!");
 
         // Call memcmp handler to avoid code duplication
         return hooked_memcmp(s1, s2, n);
@@ -102,7 +113,7 @@ static int hooked_strcmp(const char *s1, const char *s2) {
 
     @autoreleasepool {
         if (strcmp(s1, "x-gorgon") == 0 || strcmp(s2, "x-gorgon") == 0) {
-            NSLog(@"[TikTokHeaders] strcmp hit x-gorgon!");
+            addDebugLog(@"strcmp hit x-gorgon!");
         }
     }
 
@@ -124,7 +135,7 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
             return result;
         }
 
-        NSLog(@"[TikTokHeaders] memcmp hit x-gorgon!");
+        addDebugLog(@"memcmp hit x-gorgon!");
 
         // Get x26 register via inline assembly
         void *x26_ptr = NULL;
@@ -256,8 +267,22 @@ static NSString* generateHTML() {
     [html appendString:@".url{color:#0ff;word-break:break-all;font-size:10px;white-space:pre-wrap}"];
     [html appendString:@".header{color:#ff0;margin:5px 0;word-break:break-all;white-space:pre-wrap}"];
     [html appendString:@".label{color:#f90;font-weight:bold}"];
-    [html appendString:@"h1{color:#0ff}</style></head><body>"];
+    [html appendString:@".logs{border:2px solid #f00;margin:20px 0;padding:15px;background:#220000}"];
+    [html appendString:@".log{color:#fff;margin:3px 0;font-size:11px}"];
+    [html appendString:@"h1{color:#0ff}h2{color:#f00}</style></head><body>"];
     [html appendFormat:@"<h1>TikTok Request Headers</h1><p>Captured: %d</p>", (int)capturedData.count];
+
+    // Add debug logs section at top
+    if (debugLogs && debugLogs.count > 0) {
+        [html appendString:@"<div class='logs'><h2>🔍 Debug Logs (最近20条)</h2>"];
+        NSArray *recentLogs = debugLogs.count > 20 ? [debugLogs subarrayWithRange:NSMakeRange(debugLogs.count - 20, 20)] : debugLogs;
+        for (NSString *log in [recentLogs reverseObjectEnumerator]) {
+            [html appendFormat:@"<div class='log'>%@</div>", log];
+        }
+        [html appendString:@"</div>"];
+    } else {
+        [html appendString:@"<div class='logs'><h2>🔍 Debug Logs</h2><p style='color:#888'>No logs yet. dylib可能没加载或hook未触发。</p></div>"];
+    }
 
     for (NSDictionary *item in [capturedData reverseObjectEnumerator]) {
         [html appendString:@"<div class='item'>"];
@@ -515,29 +540,32 @@ __attribute__((unused)) static void handlePan(UIPanGestureRecognizer *gesture) {
 %ctor {
     @autoreleasepool {
         capturedData = [NSMutableArray new];
+        debugLogs = [NSMutableArray new];
 
-        NSLog(@"[TikTokHeaders] dylib loaded - multi-hook mode for A10 compatibility");
+        addDebugLog(@"dylib loaded - multi-hook mode for A10 compatibility");
 
         // Hook memcmp
         MSHookFunction((void *)memcmp, (void *)hooked_memcmp, (void **)&original_memcmp);
-        NSLog(@"[TikTokHeaders] memcmp hooked");
+        addDebugLog(@"memcmp hooked");
 
         // Hook bcmp for A10 compatibility
         MSHookFunction((void *)bcmp, (void *)hooked_bcmp, (void **)&original_bcmp);
-        NSLog(@"[TikTokHeaders] bcmp hooked");
+        addDebugLog(@"bcmp hooked");
 
         // Hook strcmp for debugging
         MSHookFunction((void *)strcmp, (void *)hooked_strcmp, (void **)&original_strcmp);
-        NSLog(@"[TikTokHeaders] strcmp hooked");
+        addDebugLog(@"strcmp hooked");
 
         // Start HTTP server
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
             startHTTPServer();
+            addDebugLog(@"HTTP server started on port 8888");
         });
 
         // Create floating button
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
             createFloatingButton();
+            addDebugLog(@"Floating button created");
         });
 
         NSLog(@"[TikTokHeaders] HTTP Server on port %d, access via http://192.168.9.102:8888", HTTP_PORT);
