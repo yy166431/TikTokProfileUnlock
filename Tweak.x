@@ -416,7 +416,7 @@ static void closeDataWindow() {
 
 %end
 
-// ==================== Hook NSURLSession ====================
+// ==================== Hook NSURLSessionTask ====================
 
 %hook NSURLSessionTask
 
@@ -437,11 +437,21 @@ static void closeDataWindow() {
             capture[@"type"] = @"request_task";
             capture[@"url"] = urlStr;
             capture[@"method"] = [request HTTPMethod] ?: @"GET";
-            capture[@"headers"] = [request allHTTPHeaderFields] ?: @{};
+
+            // ★★★ 捕获请求头 ★★★
+            NSDictionary *headers = [request allHTTPHeaderFields];
+            if (headers && headers.count > 0) {
+                capture[@"request_headers"] = headers;
+                NSLog(@"[TKCapture] ✓✓✓ NSURLSessionTask captured %lu request headers", (unsigned long)headers.count);
+            } else {
+                NSLog(@"[TKCapture] ✗ NSURLSessionTask: allHTTPHeaderFields is empty");
+            }
+
             capture[@"body"] = [request HTTPBody] ? [[NSString alloc] initWithData:[request HTTPBody] encoding:NSUTF8StringEncoding] : @"";
 
             [capturedData addObject:capture];
             NSLog(@"[TKCapture] ★ Task Request #%d: %@", captureCount, urlStr);
+            NSLog(@"[TKCapture]   Headers count: %lu", (unsigned long)headers.count);
         }
     }
 
@@ -603,26 +613,70 @@ static void closeDataWindow() {
             } else {
                 NSLog(@"[TKCapture] ✗ No request headers in pending cache for URL");
 
-                // 尝试通过反射获取请求头
+                // ★★★ 增强版反射：遍历所有 ivar，不限定名字 ★★★
                 @try {
                     unsigned int ivarCount = 0;
                     Ivar *ivars = class_copyIvarList([self class], &ivarCount);
 
+                    NSLog(@"[TKCapture] Scanning %u ivars in TTHttpResponseChromium...", ivarCount);
+
                     for (unsigned int i = 0; i < ivarCount; i++) {
                         Ivar ivar = ivars[i];
                         const char *ivarName = ivar_getName(ivar);
+                        const char *ivarType = ivar_getTypeEncoding(ivar);
                         NSString *name = [NSString stringWithUTF8String:ivarName];
+                        NSString *type = [NSString stringWithUTF8String:ivarType];
 
-                        // 查找名字包含 request 的属性
-                        if ([name.lowercaseString containsString:@"request"]) {
-                            id value = object_getIvar(self, ivar);
+                        id value = object_getIvar(self, ivar);
 
-                            // 如果是 NSURLRequest 类型
-                            if ([value isKindOfClass:[NSURLRequest class]]) {
-                                NSURLRequest *request = (NSURLRequest *)value;
-                                capture[@"request_headers"] = [request allHTTPHeaderFields] ?: @{};
-                                NSLog(@"[TKCapture] ✓ Found request in ivar: %@", name);
+                        if (!value) continue;
+
+                        // 打印所有非空 ivar
+                        NSLog(@"[TKCapture]   ivar[%u]: %@ (type: %@, class: %@)",
+                            i, name, type, NSStringFromClass([value class]));
+
+                        // 方案1: 直接查找 NSURLRequest
+                        if ([value isKindOfClass:[NSURLRequest class]]) {
+                            NSURLRequest *request = (NSURLRequest *)value;
+                            NSDictionary *reqHeaders = [request allHTTPHeaderFields];
+                            if (reqHeaders && reqHeaders.count > 0) {
+                                capture[@"request_headers"] = reqHeaders;
+                                NSLog(@"[TKCapture] ✓✓✓ Found NSURLRequest in ivar: %@", name);
                                 break;
+                            }
+                        }
+
+                        // 方案2: 查找包含 request 的对象，递归读取其属性
+                        if ([name.lowercaseString containsString:@"task"] ||
+                            [name.lowercaseString containsString:@"connection"] ||
+                            [name.lowercaseString containsString:@"http"]) {
+
+                            // 尝试调用 request 方法
+                            if ([value respondsToSelector:@selector(request)]) {
+                                id requestObj = [value performSelector:@selector(request)];
+                                if ([requestObj isKindOfClass:[NSURLRequest class]]) {
+                                    NSURLRequest *request = (NSURLRequest *)requestObj;
+                                    NSDictionary *reqHeaders = [request allHTTPHeaderFields];
+                                    if (reqHeaders && reqHeaders.count > 0) {
+                                        capture[@"request_headers"] = reqHeaders;
+                                        NSLog(@"[TKCapture] ✓✓✓ Found request via -request method on ivar: %@", name);
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // 尝试调用 currentRequest
+                            if ([value respondsToSelector:@selector(currentRequest)]) {
+                                id requestObj = [value performSelector:@selector(currentRequest)];
+                                if ([requestObj isKindOfClass:[NSURLRequest class]]) {
+                                    NSURLRequest *request = (NSURLRequest *)requestObj;
+                                    NSDictionary *reqHeaders = [request allHTTPHeaderFields];
+                                    if (reqHeaders && reqHeaders.count > 0) {
+                                        capture[@"request_headers"] = reqHeaders;
+                                        NSLog(@"[TKCapture] ✓✓✓ Found request via -currentRequest on ivar: %@", name);
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }
@@ -695,6 +749,9 @@ static void closeDataWindow() {
                 NSDictionary *headers = [request allHTTPHeaderFields];
                 if (headers && headers.count > 0) {
                     capture[@"request_headers"] = headers;
+                    NSLog(@"[TKCapture] ✓✓✓ TTHttpTask captured %lu request headers", (unsigned long)headers.count);
+                } else {
+                    NSLog(@"[TKCapture] ✗ TTHttpTask: request.allHTTPHeaderFields is empty");
                 }
 
                 // 保存到 pendingRequests，用 URL 作为 key 方便响应时关联
@@ -703,11 +760,21 @@ static void closeDataWindow() {
                 }
                 pendingRequests[urlStr] = capture;
 
-                NSLog(@"[TKCapture] ★★★ Request #%d", captureCount);
+                NSLog(@"[TKCapture] ★★★ TTHttpTask Request #%d", captureCount);
                 NSLog(@"[TKCapture]   URL: %@", urlStr);
                 NSLog(@"[TKCapture]   Method: %@", method);
-                NSLog(@"[TKCapture]   Headers: %lu", (unsigned long)[headers count]);
+                NSLog(@"[TKCapture]   Headers count: %lu", (unsigned long)[headers count]);
+
+                // 打印请求头详情（前5个）
+                int printCount = 0;
+                for (NSString *key in headers) {
+                    if (printCount++ < 5) {
+                        NSLog(@"[TKCapture]   Header: %@ = %@", key, headers[key]);
+                    }
+                }
             }
+        } else {
+            NSLog(@"[TKCapture] ✗ TTHttpTask.resume: [self request] returned nil");
         }
     } @catch (NSException *e) {
         NSLog(@"[TKCapture] Exception in TTHttpTask resume: %@", e);
@@ -814,6 +881,86 @@ static void closeDataWindow() {
 
 %end
 
+// ==================== 调试函数：验证类和方法 ====================
+
+static void debugNetworkClasses() {
+    NSLog(@"[TKCapture] ==================== CLASS DEBUG ====================");
+
+    // 1. 验证 TTHttpTask 类是否存在
+    Class ttHttpTaskClass = objc_getClass("TTHttpTask");
+    if (ttHttpTaskClass) {
+        NSLog(@"[TKCapture] ✓ TTHttpTask class EXISTS");
+
+        // 打印所有实例方法
+        unsigned int methodCount = 0;
+        Method *methods = class_copyMethodList(ttHttpTaskClass, &methodCount);
+        NSLog(@"[TKCapture] TTHttpTask has %u instance methods", methodCount);
+
+        int relevantCount = 0;
+        for (unsigned int i = 0; i < methodCount && relevantCount < 20; i++) {
+            SEL selector = method_getName(methods[i]);
+            NSString *methodName = NSStringFromSelector(selector);
+
+            // 只打印包含关键词的方法
+            if ([methodName.lowercaseString containsString:@"request"] ||
+                [methodName.lowercaseString containsString:@"resume"] ||
+                [methodName.lowercaseString containsString:@"send"] ||
+                [methodName.lowercaseString containsString:@"start"] ||
+                [methodName.lowercaseString containsString:@"header"]) {
+                NSLog(@"[TKCapture]   method: %@", methodName);
+                relevantCount++;
+            }
+        }
+
+        if (methods) free(methods);
+    } else {
+        NSLog(@"[TKCapture] ✗ TTHttpTask class NOT FOUND - searching alternatives...");
+
+        // 搜索可能的替代类名
+        unsigned int classCount = 0;
+        Class *classes = objc_copyClassList(&classCount);
+
+        int foundCount = 0;
+        for (unsigned int i = 0; i < classCount && foundCount < 50; i++) {
+            const char *className = class_getName(classes[i]);
+            NSString *name = [NSString stringWithUTF8String:className];
+
+            // 查找 TikTok 的网络类
+            if (([name containsString:@"TT"] && ([name containsString:@"Http"] || [name containsString:@"Network"] || [name containsString:@"Request"])) ||
+                ([name containsString:@"AWE"] && ([name containsString:@"Http"] || [name containsString:@"Network"]))) {
+                NSLog(@"[TKCapture]   alternative: %@", name);
+                foundCount++;
+            }
+        }
+
+        if (classes) free(classes);
+    }
+
+    // 2. 验证 TTHttpResponseChromium 类
+    Class ttHttpResponseClass = objc_getClass("TTHttpResponseChromium");
+    if (ttHttpResponseClass) {
+        NSLog(@"[TKCapture] ✓ TTHttpResponseChromium class EXISTS");
+
+        // 打印所有 ivar
+        unsigned int ivarCount = 0;
+        Ivar *ivars = class_copyIvarList(ttHttpResponseClass, &ivarCount);
+        NSLog(@"[TKCapture] TTHttpResponseChromium has %u ivars:", ivarCount);
+
+        for (unsigned int i = 0; i < ivarCount; i++) {
+            Ivar ivar = ivars[i];
+            const char *ivarName = ivar_getName(ivar);
+            const char *ivarType = ivar_getTypeEncoding(ivar);
+            NSLog(@"[TKCapture]   ivar: %s (type: %s)", ivarName, ivarType);
+        }
+
+        if (ivars) free(ivars);
+    } else {
+        NSLog(@"[TKCapture] ✗ TTHttpResponseChromium class NOT FOUND");
+    }
+
+    NSLog(@"[TKCapture] ==================== END DEBUG ====================");
+}
+
 __attribute__((constructor))
 static void init() {
     NSLog(@"[TKCapture] ✓ Loaded");
@@ -821,6 +968,9 @@ static void init() {
     capturedData = [NSMutableArray new];
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        // 运行调试函数
+        debugNetworkClasses();
+
         setupLocalServer();
         createFloatingButton();
     });
