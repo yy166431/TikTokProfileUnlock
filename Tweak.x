@@ -22,6 +22,54 @@ static UIWindow *dataWindow = nil;
 // Original memcmp
 static int (*original_memcmp)(const void *, const void *, size_t);
 
+// Enhanced header extraction - handles both key:value and keyvalue formats
+static NSString* extractHeader(NSString *raw, NSString *key) {
+    NSRange keyRange = [raw rangeOfString:key options:NSCaseInsensitiveSearch];
+    if (keyRange.location == NSNotFound) return @"";
+
+    NSInteger start = keyRange.location + key.length;
+    if (start >= raw.length) return @"";
+
+    // Skip separators: '=', ':', ' ', '\r', '\n'
+    while (start < raw.length) {
+        unichar ch = [raw characterAtIndex:start];
+        if (ch != '=' && ch != ':' && ch != ' ' && ch != '\r' && ch != '\n') break;
+        start++;
+    }
+
+    if (start >= raw.length) return @"";
+
+    // Find end - stop at next header key or control chars
+    NSInteger end = start;
+    NSArray *stopMarkers = @[@"x-argus", @"x-gorgon", @"x-khronos", @"x-ladon", @"x-tt-token",
+                              @"user-agent", @"cookie", @"x-tt-pba-encode", @"x-vc-bdturing-sdk-version",
+                              @"passport-sdk-version", @"pns-att-enable", @"oec-vc-sdk-version",
+                              @"x-tt-request-tag", @"rpc-persist-pns-region-1", @"x-tt-store-region",
+                              @"x-tt-store-region-src", @"rpc-persist-pyxis-policy-v-tnc", @"x-ss-dp",
+                              @"x-tt-trace-id", @"accept-encoding"];
+
+    NSInteger minEnd = raw.length;
+    for (NSString *marker in stopMarkers) {
+        NSRange markerRange = [raw rangeOfString:marker options:NSCaseInsensitiveSearch range:NSMakeRange(start, raw.length - start)];
+        if (markerRange.location != NSNotFound && markerRange.location < minEnd) {
+            minEnd = markerRange.location;
+        }
+    }
+
+    // Also check for \r\n\r\n (end of headers)
+    NSRange doubleNewline = [raw rangeOfString:@"\r\n\r\n" range:NSMakeRange(start, raw.length - start)];
+    if (doubleNewline.location != NSNotFound && doubleNewline.location < minEnd) {
+        minEnd = doubleNewline.location;
+    }
+
+    end = minEnd;
+
+    if (end <= start) return @"";
+
+    NSString *value = [[raw substringWithRange:NSMakeRange(start, end - start)] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return value;
+}
+
 // Hooked memcmp - capture signatures from x26
 static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
     int result = original_memcmp(s1, s2, n);
@@ -59,135 +107,27 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
 
         captureCount++;
 
-        // Parse headers and URL from raw data - improved parsing
-        NSString *argus = @"", *gorgon = @"", *khronos = @"", *ladon = @"";
-        NSString *ttToken = @"", *userAgent = @"", *cookie = @"";
-        NSString *ttPbaEncode = @"", *vcBdturingSdkVersion = @"", *passportSdkVersion = @"";
-        NSString *pnsAttEnable = @"", *oecVcSdkVersion = @"", *ttRequestTag = @"";
-        NSString *rpcPersistPnsRegion1 = @"", *ttStoreRegion = @"", *ttStoreRegionSrc = @"";
-        NSString *rpcPersistPyxisPolicyVTnc = @"", *ssDp = @"", *ttTraceId = @"", *acceptEncoding = @"";
-
-        // Extract x-argus (format: x-argus=VALUE or x-argus: VALUE or x-argusVALUE)
-        NSRange argusRange = [raw rangeOfString:@"x-argus"];
-        if (argusRange.location != NSNotFound) {
-            NSInteger start = argusRange.location + 7; // skip "x-argus"
-            // Skip '=' or ':' and spaces
-            while (start < raw.length) {
-                unichar ch = [raw characterAtIndex:start];
-                if (ch != '=' && ch != ':' && ch != ' ') break;
-                start++;
-            }
-            NSString *sub = [raw substringFromIndex:start];
-            // x-argus is at the end, extract until non-base64 char or end
-            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^([A-Za-z0-9+/=_-]+)" options:0 error:nil];
-            NSTextCheckingResult *match = [regex firstMatchInString:sub options:0 range:NSMakeRange(0, MIN(2000, sub.length))];
-            if (match) {
-                argus = [sub substringWithRange:[match rangeAtIndex:1]];
-            }
-        }
-
-        // Extract x-tt-token
-        NSRange ttTokenRange = [raw rangeOfString:@"x-tt-token"];
-        if (ttTokenRange.location != NSNotFound) {
-            NSInteger start = ttTokenRange.location + 10; // skip "x-tt-token"
-            while (start < raw.length) {
-                unichar ch = [raw characterAtIndex:start];
-                if (ch != '=' && ch != ':' && ch != ' ') break;
-                start++;
-            }
-            NSString *sub = [raw substringFromIndex:start];
-            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^([A-Za-z0-9_-]+)" options:0 error:nil];
-            NSTextCheckingResult *match = [regex firstMatchInString:sub options:0 range:NSMakeRange(0, MIN(500, sub.length))];
-            if (match) {
-                ttToken = [sub substringWithRange:[match rangeAtIndex:1]];
-            }
-        }
-
-        // Extract user-agent
-        NSRange uaRange = [raw rangeOfString:@"user-agent" options:NSCaseInsensitiveSearch];
-        if (uaRange.location != NSNotFound) {
-            NSInteger start = uaRange.location + 10; // skip "user-agent"
-            while (start < raw.length) {
-                unichar ch = [raw characterAtIndex:start];
-                if (ch != '=' && ch != ':' && ch != ' ') break;
-                start++;
-            }
-            NSString *sub = [raw substringFromIndex:start];
-            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^([^\r\n]+)" options:0 error:nil];
-            NSTextCheckingResult *match = [regex firstMatchInString:sub options:0 range:NSMakeRange(0, MIN(500, sub.length))];
-            if (match) {
-                userAgent = [[sub substringWithRange:[match rangeAtIndex:1]] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-            }
-        }
-
-        // Extract cookie
-        cookie = extractValue(raw, @"cookie", 5000);
-
-        // Extract additional headers
-        ttPbaEncode = extractValue(raw, @"x-tt-pba-encode", 20);
-        vcBdturingSdkVersion = extractValue(raw, @"x-vc-bdturing-sdk-version", 20);
-        passportSdkVersion = extractValue(raw, @"passport-sdk-version", 20);
-        pnsAttEnable = extractValue(raw, @"pns-att-enable", 10);
-        oecVcSdkVersion = extractValue(raw, @"oec-vc-sdk-version", 30);
-        ttRequestTag = extractValue(raw, @"x-tt-request-tag", 30);
-        rpcPersistPnsRegion1 = extractValue(raw, @"rpc-persist-pns-region-1", 50);
-        ttStoreRegion = extractValue(raw, @"x-tt-store-region", 10);
-        ttStoreRegionSrc = extractValue(raw, @"x-tt-store-region-src", 10);
-        rpcPersistPyxisPolicyVTnc = extractValue(raw, @"rpc-persist-pyxis-policy-v-tnc", 10);
-        ssDp = extractValue(raw, @"x-ss-dp", 10);
-        ttTraceId = extractValue(raw, @"x-tt-trace-id", 100);
-        acceptEncoding = extractValue(raw, @"accept-encoding", 50);
-
-        // Extract x-gorgon
-        NSRange gorgonRange = [raw rangeOfString:@"x-gorgon"];
-        if (gorgonRange.location != NSNotFound) {
-            NSInteger start = gorgonRange.location + 8;
-            while (start < raw.length) {
-                unichar ch = [raw characterAtIndex:start];
-                if (ch != '=' && ch != ':' && ch != ' ') break;
-                start++;
-            }
-            NSString *sub = [raw substringFromIndex:start];
-            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^([0-9a-f]{40,})(?=x-)" options:0 error:nil];
-            NSTextCheckingResult *match = [regex firstMatchInString:sub options:0 range:NSMakeRange(0, MIN(100, sub.length))];
-            if (match) {
-                gorgon = [sub substringWithRange:[match rangeAtIndex:1]];
-            }
-        }
-
-        // Extract x-khronos
-        NSRange khronosRange = [raw rangeOfString:@"x-khronos"];
-        if (khronosRange.location != NSNotFound) {
-            NSInteger start = khronosRange.location + 9;
-            while (start < raw.length) {
-                unichar ch = [raw characterAtIndex:start];
-                if (ch != '=' && ch != ':' && ch != ' ') break;
-                start++;
-            }
-            NSString *sub = [raw substringFromIndex:start];
-            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^(\\d{10,})(?=x-)" options:0 error:nil];
-            NSTextCheckingResult *match = [regex firstMatchInString:sub options:0 range:NSMakeRange(0, MIN(50, sub.length))];
-            if (match) {
-                khronos = [sub substringWithRange:[match rangeAtIndex:1]];
-            }
-        }
-
-        // Extract x-ladon
-        NSRange ladonRange = [raw rangeOfString:@"x-ladon"];
-        if (ladonRange.location != NSNotFound) {
-            NSInteger start = ladonRange.location + 7;
-            while (start < raw.length) {
-                unichar ch = [raw characterAtIndex:start];
-                if (ch != '=' && ch != ':' && ch != ' ') break;
-                start++;
-            }
-            NSString *sub = [raw substringFromIndex:start];
-            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^([A-Za-z0-9+/=_-]{50,})(?=x-)" options:0 error:nil];
-            NSTextCheckingResult *match = [regex firstMatchInString:sub options:0 range:NSMakeRange(0, MIN(1500, sub.length))];
-            if (match) {
-                ladon = [sub substringWithRange:[match rangeAtIndex:1]];
-            }
-        }
+        // Extract all headers using improved extraction
+        NSString *argus = extractHeader(raw, @"x-argus");
+        NSString *gorgon = extractHeader(raw, @"x-gorgon");
+        NSString *khronos = extractHeader(raw, @"x-khronos");
+        NSString *ladon = extractHeader(raw, @"x-ladon");
+        NSString *ttToken = extractHeader(raw, @"x-tt-token");
+        NSString *userAgent = extractHeader(raw, @"user-agent");
+        NSString *cookie = extractHeader(raw, @"cookie");
+        NSString *ttPbaEncode = extractHeader(raw, @"x-tt-pba-encode");
+        NSString *vcBdturingSdkVersion = extractHeader(raw, @"x-vc-bdturing-sdk-version");
+        NSString *passportSdkVersion = extractHeader(raw, @"passport-sdk-version");
+        NSString *pnsAttEnable = extractHeader(raw, @"pns-att-enable");
+        NSString *oecVcSdkVersion = extractHeader(raw, @"oec-vc-sdk-version");
+        NSString *ttRequestTag = extractHeader(raw, @"x-tt-request-tag");
+        NSString *rpcPersistPnsRegion1 = extractHeader(raw, @"rpc-persist-pns-region-1");
+        NSString *ttStoreRegion = extractHeader(raw, @"x-tt-store-region");
+        NSString *ttStoreRegionSrc = extractHeader(raw, @"x-tt-store-region-src");
+        NSString *rpcPersistPyxisPolicyVTnc = extractHeader(raw, @"rpc-persist-pyxis-policy-v-tnc");
+        NSString *ssDp = extractHeader(raw, @"x-ss-dp");
+        NSString *ttTraceId = extractHeader(raw, @"x-tt-trace-id");
+        NSString *acceptEncoding = extractHeader(raw, @"accept-encoding");
 
         // Extract query string - try multiple patterns
         NSString *query = @"";
