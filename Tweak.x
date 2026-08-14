@@ -88,16 +88,21 @@ static int hooked_memcmp(const void *s1, const void *s2, size_t n) {
         NSString *khronos = extractValue(raw, @"x-khronos", 10);
         NSString *ladon = extractValue(raw, @"x-ladon", 800);
 
-        // Extract Query parameters
+        // Extract Query parameters - more permissive regex to capture full query string
         NSString *query = @"";
         NSRange musicalRange = [raw rangeOfString:@"musical_ly"];
         if (musicalRange.location != NSNotFound) {
             NSString *qStr = [raw substringFromIndex:musicalRange.location];
-            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^([a-zA-Z0-9&=_\\-%.]+)" options:0 error:nil];
-            NSTextCheckingResult *match = [regex firstMatchInString:qStr options:0 range:NSMakeRange(0, qStr.length)];
-            if (match) {
-                query = [qStr substringWithRange:[match rangeAtIndex:1]];
+            // Find end of query string (before next header or line break)
+            NSArray *endMarkers = @[@"\r\n", @"\n", @"x-gorgon", @"x-argus", @"x-khronos", @"x-ladon", @"HTTP/"];
+            NSInteger endPos = qStr.length;
+            for (NSString *marker in endMarkers) {
+                NSRange r = [qStr rangeOfString:marker];
+                if (r.location != NSNotFound && r.location < endPos) {
+                    endPos = r.location;
+                }
             }
+            query = [[qStr substringToIndex:endPos] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         }
 
         // Build complete URL
@@ -140,8 +145,8 @@ static NSString* generateHTML() {
     [html appendString:@"<!DOCTYPE html><html><head><meta charset='utf-8'><title>TikTok Headers</title>"];
     [html appendString:@"<style>body{font-family:monospace;padding:20px;background:#000;color:#0f0}"];
     [html appendString:@".item{border:1px solid #0f0;margin:10px 0;padding:15px;background:#111}"];
-    [html appendString:@".url{color:#0ff;word-break:break-all;font-size:11px}"];
-    [html appendString:@".header{color:#ff0;margin:5px 0}"];
+    [html appendString:@".url{color:#0ff;word-break:break-all;font-size:10px;white-space:pre-wrap}"];
+    [html appendString:@".header{color:#ff0;margin:5px 0;word-break:break-all;white-space:pre-wrap}"];
     [html appendString:@".label{color:#f90;font-weight:bold}"];
     [html appendString:@"h1{color:#0ff}</style></head><body>"];
     [html appendFormat:@"<h1>TikTok Request Headers</h1><p>Captured: %d</p>", (int)capturedData.count];
