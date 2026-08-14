@@ -1,15 +1,12 @@
-TARGET := iphone:clang:latest:14.0
-INSTALL_TARGET_PROCESSES = TikTok Aweme
+TARGET = iphone:clang:latest:14.0
+ARCHS = arm64
 
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = TikTokProfileUnlock
+TWEAK_NAME = TikTokCapture
 
-TikTokProfileUnlock_FILES = Tweak_memscan.x
-TikTokProfileUnlock_CFLAGS = -fobjc-arc
-TikTokProfileUnlock_FRAMEWORKS = UIKit Foundation
-TikTokProfileUnlock_PRIVATE_FRAMEWORKS =
-TikTokProfileUnlock_LDFLAGS = -undefined dynamic_lookup
-TikTokProfileUnlock_LIBRARIES =
+TikTokCapture_FILES = Tweak.x
+TikTokCapture_CFLAGS = -fobjc-arc
+TikTokCapture_LDFLAGS = -undefined dynamic_lookup
 
-include $(THEOS)/makefiles/tweak.mk
+include $(THEOS_MAKE_PATH)/tweak.mk

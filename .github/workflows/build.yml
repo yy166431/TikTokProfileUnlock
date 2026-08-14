@@ -1,56 +1,44 @@
-name: Build TikTok Dump Dylib
+name: Build TikTokCapture
 
 on:
   push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
+    branches: [ main ]
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   build:
     runs-on: macos-latest
-    
+
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
-      
+    - uses: actions/checkout@v3
+
     - name: Setup Theos
       run: |
-        export THEOS=$HOME/theos
         git clone --recursive https://github.com/theos/theos.git $THEOS
-        echo "THEOS=$THEOS" >> $GITHUB_ENV
-        
-    - name: Setup iOS SDK
-      run: |
-        curl -LO https://github.com/theos/sdks/archive/master.zip
-        unzip master.zip
-        mv sdks-master/* $THEOS/sdks/
+        curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_macosx_x86_64
+        chmod +x ldid_macosx_x86_64
+        sudo mv ldid_macosx_x86_64 /usr/local/bin/ldid
+      env:
+        THEOS: /opt/theos
 
-    - name: Install ldid
+    - name: Build dylib
       run: |
-        brew install ldid
-
-    - name: Build
-      run: |
+        export THEOS=/opt/theos
         make clean
-        make
+        make package FINALPACKAGE=1
 
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: TikTokProfileUnlock-dylib
-        path: .theos/obj/debug/*.dylib
+    - name: Extract dylib
+      run: |
+        mkdir -p output
+        dpkg-deb -x packages/*.deb output/
+        find output -name "*.dylib" -exec cp {} TikTokCapture.dylib \;
 
-    - name: Create Release
-      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    - name: Upload Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: v1.0.${{ github.run_number }}
-        name: Release v1.0.${{ github.run_number }}
-        files: .theos/obj/debug/*.dylib
+        files: |
+          TikTokCapture.dylib
+          packages/*.deb
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

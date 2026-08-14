@@ -1,7 +1,0 @@
-[+] TikTok 已在运行, attach pid=848
-[+] 脚本加载完成, 监控中...
-[A] TTNetworkManager hooked = 55
-[B] NSURLRequest hooked
-[C] NSURLSession hooked = 12
-[READY] 抓包已启动! 现在去刷抖音, 然后点"我"进个人主页, 盯 ★PROFILE★
-[*] 监控结束

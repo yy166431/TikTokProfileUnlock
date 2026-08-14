@@ -1,4 +1,0 @@
-[+] attach pid=1058
-[hook] GPBMessage + parseFromData:error:
-[hook] GPBMessage - initWithData:error:
-[OK] hook GPBMessage上了(过滤GetUserProfileSelfResponse), 点个人主页/下[*] 结束[*] 结束(os._exit保护)

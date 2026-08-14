@@ -1,4 +1,0 @@
-[+] attach pid=1096
-[found] TTHTTPBinaryResponseSerializerBase -> - responseObjectForResponse:data:responseError:resultError:
-[OK] 挂1个hook(最小), 点个人主页/下拉刷新
-[*] 结束(os._exit保护)
