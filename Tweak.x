@@ -30,13 +30,41 @@ static NSString* generateHTML() {
     [html appendString:@".item{border:1px solid #0f0;margin:10px 0;padding:10px;background:#000}"];
     [html appendString:@".url{color:#0ff;word-break:break-all}"];
     [html appendString:@".json{color:#ff0;white-space:pre-wrap;max-height:300px;overflow:auto}"];
+    [html appendString:@".label{color:#f90;font-weight:bold}"];
     [html appendString:@"</style></head><body>"];
     [html appendFormat:@"<h1>TikTok Profile Capture</h1><p>捕获数量: %d</p>", (int)capturedData.count];
     [html appendString:@"<div id='list'>"];
 
     for (NSDictionary *item in [capturedData reverseObjectEnumerator]) {
-        [html appendFormat:@"<div class='item'><b>ID:</b> %@<br><b>URL:</b> <span class='url'>%@</span><br><b>响应:</b><pre class='json'>%@</pre></div>",
-            item[@"id"], item[@"url"] ?: @"N/A", item[@"response"] ?: @"N/A"];
+        [html appendString:@"<div class='item'>"];
+        [html appendFormat:@"<span class='label'>ID:</span> %@<br>", item[@"id"]];
+        [html appendFormat:@"<span class='label'>Type:</span> %@<br>", item[@"type"] ?: @"N/A"];
+
+        if (item[@"url"]) {
+            [html appendFormat:@"<span class='label'>URL:</span> <span class='url'>%@</span><br>", item[@"url"]];
+        }
+        if (item[@"method"]) {
+            [html appendFormat:@"<span class='label'>Method:</span> %@<br>", item[@"method"]];
+        }
+        if (item[@"request_headers"]) {
+            NSData *jsonData = [NSJSONSerialization dataWithJSONObject:item[@"request_headers"] options:NSJSONWritingPrettyPrinted error:nil];
+            if (jsonData) {
+                NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+                [html appendFormat:@"<span class='label'>Request Headers:</span><pre class='json'>%@</pre>", jsonStr];
+            }
+        }
+        if (item[@"request_body"]) {
+            [html appendFormat:@"<span class='label'>Request Body:</span><pre class='json'>%@</pre>", item[@"request_body"]];
+        }
+        if (item[@"response_body"]) {
+            NSString *resp = item[@"response_body"];
+            if ([resp length] > 2000) {
+                [html appendFormat:@"<span class='label'>Response Body:</span><pre class='json'>%@...</pre>", [resp substringToIndex:2000]];
+            } else {
+                [html appendFormat:@"<span class='label'>Response Body:</span><pre class='json'>%@</pre>", resp];
+            }
+        }
+        [html appendString:@"</div>"];
     }
 
     if (capturedData.count == 0) {
@@ -229,18 +257,23 @@ static void showDataWindow() {
             if (item[@"method"]) {
                 [content appendFormat:@"方法: %@\n", item[@"method"]];
             }
-            if (item[@"headers"] && [item[@"headers"] count] > 0) {
-                [content appendFormat:@"请求头: %@\n", item[@"headers"]];
+            if (item[@"request_headers"] && [item[@"request_headers"] count] > 0) {
+                [content appendFormat:@"请求头: %@\n", item[@"request_headers"]];
             }
-            if (item[@"body"] && [item[@"body"] length] > 0) {
-                [content appendFormat:@"请求体: %@\n", item[@"body"]];
-            }
-            if (item[@"response"]) {
-                NSString *resp = item[@"response"];
-                if ([resp length] > 500) {
-                    [content appendFormat:@"响应: %@...\n", [resp substringToIndex:500]];
+            if (item[@"request_body"] && [item[@"request_body"] length] > 0) {
+                NSString *body = item[@"request_body"];
+                if ([body length] > 300) {
+                    [content appendFormat:@"请求体: %@...\n", [body substringToIndex:300]];
                 } else {
-                    [content appendFormat:@"响应: %@\n", resp];
+                    [content appendFormat:@"请求体: %@\n", body];
+                }
+            }
+            if (item[@"response_body"]) {
+                NSString *resp = item[@"response_body"];
+                if ([resp length] > 500) {
+                    [content appendFormat:@"响应体: %@...\n", [resp substringToIndex:500]];
+                } else {
+                    [content appendFormat:@"响应体: %@\n", resp];
                 }
             }
             [content appendString:@"\n"];
@@ -498,58 +531,130 @@ static void closeDataWindow() {
 
 %end
 
-// ==================== 构造函数 ====================
+// ==================== Hook TTHttpTask (完整请求响应捕获) ====================
 
-// ==================== Hook TTHttpTask ====================
+%hook TTHttpTask
 
-%hook NSObject
-
-- (void)start {
-    %orig;
-
-    // 只 hook TTHttpTask 类的实例
-    if (![NSStringFromClass([self class]) containsString:@"TTHttpTask"]) {
-        return;
-    }
-
+- (void)resume {
     @try {
-        if ([self respondsToSelector:@selector(request)]) {
-            id request = [self performSelector:@selector(request)];
+        // 获取请求对象
+        NSURLRequest *request = [self request];
 
-            if (request && [request respondsToSelector:@selector(URL)]) {
-                NSURL *url = [request performSelector:@selector(URL)];
+        if (request) {
+            NSURL *url = [request URL];
+            NSString *urlStr = [url absoluteString];
 
-                if (url) {
-                    NSString *urlStr = [url absoluteString];
+            // 只捕获 profile/self 相关请求
+            if ([urlStr containsString:@"profile"] || [urlStr containsString:@"self"]) {
+                captureCount++;
 
-                    if ([urlStr containsString:@"profile"] || [urlStr containsString:@"self"]) {
-                        captureCount++;
+                // 创建请求记录
+                NSMutableDictionary *capture = [NSMutableDictionary new];
+                capture[@"id"] = @(captureCount);
+                capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
+                capture[@"type"] = @"tthttptask";
 
-                        NSMutableDictionary *capture = [NSMutableDictionary new];
-                        capture[@"id"] = @(captureCount);
-                        capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
-                        capture[@"type"] = @"request_tttask";
-                        capture[@"url"] = urlStr;
+                // 捕获完整 URL（包含所有参数）
+                capture[@"url"] = urlStr;
 
-                        if ([request respondsToSelector:@selector(HTTPMethod)]) {
-                            capture[@"method"] = [request performSelector:@selector(HTTPMethod)] ?: @"GET";
-                        }
-                        if ([request respondsToSelector:@selector(allHTTPHeaderFields)]) {
-                            capture[@"headers"] = [request performSelector:@selector(allHTTPHeaderFields)] ?: @{};
-                        }
+                // 捕获请求方法
+                capture[@"method"] = [request HTTPMethod] ?: @"GET";
 
-                        [capturedData addObject:capture];
-                        NSLog(@"[TKCapture] ★ TTHttpTask #%d: %@", captureCount, urlStr);
+                // 捕获请求头
+                NSDictionary *headers = [request allHTTPHeaderFields];
+                if (headers && headers.count > 0) {
+                    capture[@"request_headers"] = headers;
+                }
+
+                // 捕获请求体
+                NSData *bodyData = [request HTTPBody];
+                if (bodyData && bodyData.length > 0) {
+                    NSString *bodyStr = [[NSString alloc] initWithData:bodyData encoding:NSUTF8StringEncoding];
+                    if (bodyStr) {
+                        capture[@"request_body"] = bodyStr;
                     }
                 }
+
+                // 保存到 pendingRequests，用任务地址作为 key
+                NSString *taskKey = [NSString stringWithFormat:@"%p", self];
+                if (!pendingRequests) {
+                    pendingRequests = [NSMutableDictionary new];
+                }
+                pendingRequests[taskKey] = capture;
+
+                NSLog(@"[TKCapture] ★★★ Request #%d", captureCount);
+                NSLog(@"[TKCapture]   URL: %@", urlStr);
+                NSLog(@"[TKCapture]   Method: %@", capture[@"method"]);
+                NSLog(@"[TKCapture]   Headers: %lu", (unsigned long)[headers count]);
             }
         }
     } @catch (NSException *e) {
-        NSLog(@"[TKCapture] Exception in TTHttpTask hook: %@", e);
+        NSLog(@"[TKCapture] Exception in TTHttpTask resume: %@", e);
     }
+
+    %orig;
+}
+
+- (void)readDataOfMinLength:(NSUInteger)minBytes maxLength:(NSUInteger)maxBytes timeout:(NSTimeInterval)timeout completionHandler:(void (^)(NSData *data, BOOL atEOF, NSError *error))completionHandler {
+
+    // 保存原始 completion handler
+    void (^originalHandler)(NSData *, BOOL, NSError *) = completionHandler;
+
+    // 创建新的 completion handler 来拦截响应数据
+    void (^newHandler)(NSData *, BOOL, NSError *) = ^(NSData *data, BOOL atEOF, NSError *error) {
+
+        @try {
+            if (data && data.length > 0) {
+                NSString *taskKey = [NSString stringWithFormat:@"%p", self];
+                NSMutableDictionary *capture = pendingRequests[taskKey];
+
+                if (capture) {
+                    // 尝试解析为字符串
+                    NSString *responseStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+
+                    if (responseStr) {
+                        // 如果已有响应体，追加
+                        if (capture[@"response_body"]) {
+                            capture[@"response_body"] = [capture[@"response_body"] stringByAppendingString:responseStr];
+                        } else {
+                            capture[@"response_body"] = responseStr;
+                        }
+
+                        NSLog(@"[TKCapture] ★★★ Response data: %lu bytes (EOF: %d)", (unsigned long)data.length, atEOF);
+                    }
+
+                    // 如果是最后一块数据，保存完整记录
+                    if (atEOF) {
+                        [capturedData addObject:capture];
+                        [pendingRequests removeObjectForKey:taskKey];
+
+                        // 更新悬浮按钮数字
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            if (floatingButton) {
+                                [floatingButton setTitle:[NSString stringWithFormat:@"%d", (int)capturedData.count] forState:UIControlStateNormal];
+                            }
+                        });
+
+                        NSLog(@"[TKCapture] ✓ Complete capture saved (ID: %@)", capture[@"id"]);
+                    }
+                }
+            }
+        } @catch (NSException *e) {
+            NSLog(@"[TKCapture] Exception in completion handler: %@", e);
+        }
+
+        // 调用原始 handler
+        if (originalHandler) {
+            originalHandler(data, atEOF, error);
+        }
+    };
+
+    %orig(minBytes, maxBytes, timeout, newHandler);
 }
 
 %end
+
+// ==================== 构造函数 ====================
 
 // ==================== Hook NSURL initWithString ====================
 
