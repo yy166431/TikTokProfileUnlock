@@ -35,6 +35,11 @@ static int (*original_memcmp)(const void *, const void *, size_t);
 static int (*original_bcmp)(const void *, const void *, size_t);
 static int (*original_strcmp)(const char *, const char *);
 
+// Forward declarations
+static int hooked_memcmp(const void *s1, const void *s2, size_t n);
+static int hooked_bcmp(const void *s1, const void *s2, size_t n);
+static int hooked_strcmp(const char *s1, const char *s2);
+
 // Enhanced header extraction - handles both key:value and keyvalue formats
 static NSString* extractHeader(NSString *raw, NSString *key) {
     NSRange keyRange = [raw rangeOfString:key options:NSCaseInsensitiveSearch];
