@@ -1,14 +1,15 @@
 TARGET = iphone:clang:latest:14.0
-ARCHS = arm64
+ARCHS = arm64 arm64e
 
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = TikTokCapture
+TWEAK_NAME = TikTokMITMProxy
 
-TikTokCapture_FILES = Tweak.x
-TikTokCapture_CFLAGS = -fobjc-arc
-TikTokCapture_FRAMEWORKS = UIKit Foundation
-TikTokCapture_LDFLAGS = -undefined dynamic_lookup
+TikTokMITMProxy_FILES = Tweak_MITM.x
+TikTokMITMProxy_CFLAGS = -fobjc-arc
+TikTokMITMProxy_FRAMEWORKS = UIKit Foundation Security CFNetwork
+TikTokMITMProxy_LDFLAGS = -undefined dynamic_lookup
+TikTokMITMProxy_LIBRARIES = substrate
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
