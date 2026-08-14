@@ -1,12 +1,9 @@
-name: Build TikTokCapture
+name: Build TikTok Headers Capture
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   build:
@@ -16,33 +13,32 @@ jobs:
     - uses: actions/checkout@v3
 
     - name: Setup Theos
+      uses: actions/checkout@v3
+      with:
+        repository: theos/theos
+        path: theos
+        submodules: recursive
+
+    - name: Setup Theos SDKs
       run: |
-        sudo git clone --recursive https://github.com/theos/theos.git /opt/theos
-        sudo chown -R $(whoami):staff /opt/theos
-        curl -LO https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_macosx_x86_64
-        chmod +x ldid_macosx_x86_64
-        sudo mv ldid_macosx_x86_64 /usr/local/bin/ldid
+        curl -LO https://github.com/theos/sdks/archive/master.zip
+        unzip master.zip
+        mv sdks-master/iPhoneOS*.sdk theos/sdks/
 
     - name: Build dylib
       run: |
-        export THEOS=/opt/theos
+        export THEOS=./theos
         make clean
-        make FINALPACKAGE=1
+        make package FINALPACKAGE=1
 
-    - name: Extract dylib
-      run: |
-        mkdir -p output
-        cp .theos/obj/TikTokMITMProxy.dylib output/
-        cp TikTokMITMProxy.plist output/
-        cd output && zip -r TikTokMITMProxy.zip TikTokMITMProxy.dylib TikTokMITMProxy.plist
-
-    - name: Upload Release
-      uses: softprops/action-gh-release@v1
+    - name: Upload dylib
+      uses: actions/upload-artifact@v3
       with:
-        tag_name: v1.0.${{ github.run_number }}
-        files: |
-          output/TikTokMITMProxy.dylib
-          output/TikTokMITMProxy.plist
-          output/TikTokMITMProxy.zip
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        name: TikTokHeadersCapture
+        path: .theos/obj/debug/TikTokHeadersCapture.dylib
+
+    - name: Upload deb
+      uses: actions/upload-artifact@v3
+      with:
+        name: TikTokHeadersCapture-deb
+        path: packages/*.deb

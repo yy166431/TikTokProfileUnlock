@@ -1,9 +1,8 @@
-Package: com.yy.tiktokcapture
-Name: TikTokCapture
+Package: com.tiktok.headerscapture
+Name: TikTok Headers Capture
 Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: Capture TikTok profile/self API requests and responses
-Maintainer: yy
-Author: yy
+Description: Capture TikTok API request headers (x-argus, x-gorgon, x-khronos, x-ladon) via memcmp hook. HTTP server on port 8888.
+Author: yy166431
 Section: Tweaks
-Depends: mobilesubstrate
+Depends: mobilesubstrate, preferenceloader
