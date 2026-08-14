@@ -32,17 +32,17 @@ jobs:
     - name: Extract dylib
       run: |
         mkdir -p output
-        cp .theos/obj/TikTokCapture.dylib output/
-        cp TikTokCapture.plist output/
-        cd output && zip -r TikTokCapture.zip TikTokCapture.dylib TikTokCapture.plist
+        cp .theos/obj/TikTokMITMProxy.dylib output/
+        cp TikTokMITMProxy.plist output/
+        cd output && zip -r TikTokMITMProxy.zip TikTokMITMProxy.dylib TikTokMITMProxy.plist
 
     - name: Upload Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: v1.0.${{ github.run_number }}
         files: |
-          output/TikTokCapture.dylib
-          output/TikTokCapture.plist
-          output/TikTokCapture.zip
+          output/TikTokMITMProxy.dylib
+          output/TikTokMITMProxy.plist
+          output/TikTokMITMProxy.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

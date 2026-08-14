@@ -5,6 +5,7 @@
 #import <netinet/in.h>
 #import <arpa/inet.h>
 #import <unistd.h>
+#import <ifaddrs.h>
 
 // ==================== 悬浮窗 ====================
 
@@ -157,6 +158,29 @@ static MITMProxy *proxy = nil;
     });
 }
 
+- (NSString *)getLocalIPAddress {
+    NSString *address = @"0.0.0.0";
+    struct ifaddrs *interfaces = NULL;
+    struct ifaddrs *temp_addr = NULL;
+
+    if (getifaddrs(&interfaces) == 0) {
+        temp_addr = interfaces;
+        while(temp_addr != NULL) {
+            if(temp_addr->ifa_addr->sa_family == AF_INET) {
+                // Check if interface is en0 (Wi-Fi) or en1
+                if([[NSString stringWithUTF8String:temp_addr->ifa_name] isEqualToString:@"en0"] ||
+                   [[NSString stringWithUTF8String:temp_addr->ifa_name] isEqualToString:@"en1"]) {
+                    address = [NSString stringWithUTF8String:inet_ntoa(((struct sockaddr_in *)temp_addr->ifa_addr)->sin_addr)];
+                    break;
+                }
+            }
+            temp_addr = temp_addr->ifa_next;
+        }
+    }
+    freeifaddrs(interfaces);
+    return address;
+}
+
 - (void)startWebServer {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSLog(@"[MITM] 🌐 Starting web server on port 9999...");
@@ -177,7 +201,8 @@ static MITMProxy *proxy = nil;
         }
 
         listen(sock, 10);
-        NSLog(@"[MITM] ✅ Web server at http://192.168.9.102:9999/");
+        NSString *localIP = [self getLocalIPAddress];
+        NSLog(@"[MITM] ✅ Web server at http://%@:9999/", localIP);
 
         while (YES) {
             struct sockaddr_in clientAddr;
