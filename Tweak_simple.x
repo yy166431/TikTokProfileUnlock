@@ -119,4 +119,13 @@ static void HLog(NSString *format, ...) {
 // ============ 初始化 ============
 %ctor {
     HLog(@"✅ TikTok 简化抓包插件已加载 (强制HTTPS + NSURLSession hook)");
+
+    // 立即测试日志是否能发出去
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        HLog(@"[心跳] dylib 运行中...");
+    });
+
+    // 打印当前进程名，确认注入到 TikTok
+    NSString *processName = [[NSProcessInfo processInfo] processName];
+    HLog(@"[进程] %@", processName);
 }
