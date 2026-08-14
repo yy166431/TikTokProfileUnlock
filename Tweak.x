@@ -53,9 +53,6 @@ static NSString* generateHTML() {
                 [html appendFormat:@"<span class='label'>Request Headers:</span><pre class='json'>%@</pre>", jsonStr];
             }
         }
-        if (item[@"request_body"]) {
-            [html appendFormat:@"<span class='label'>Request Body:</span><pre class='json'>%@</pre>", item[@"request_body"]];
-        }
         if (item[@"response_body"]) {
             NSString *resp = item[@"response_body"];
             if ([resp length] > 2000) {
@@ -259,14 +256,6 @@ static void showDataWindow() {
             }
             if (item[@"request_headers"] && [item[@"request_headers"] count] > 0) {
                 [content appendFormat:@"请求头: %@\n", item[@"request_headers"]];
-            }
-            if (item[@"request_body"] && [item[@"request_body"] length] > 0) {
-                NSString *body = item[@"request_body"];
-                if ([body length] > 300) {
-                    [content appendFormat:@"请求体: %@...\n", [body substringToIndex:300]];
-                } else {
-                    [content appendFormat:@"请求体: %@\n", body];
-                }
             }
             if (item[@"response_body"]) {
                 NSString *resp = item[@"response_body"];
@@ -554,25 +543,17 @@ static void closeDataWindow() {
                 capture[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
                 capture[@"type"] = @"tthttptask";
 
-                // 捕获完整 URL（包含所有参数）
+                // ★★★ 捕获完整 URL（包含所有参数）★★★
                 capture[@"url"] = urlStr;
 
                 // 捕获请求方法
-                capture[@"method"] = [request HTTPMethod] ?: @"GET";
+                NSString *method = [request HTTPMethod] ?: @"GET";
+                capture[@"method"] = method;
 
-                // 捕获请求头
+                // ★★★ 捕获请求头 ★★★
                 NSDictionary *headers = [request allHTTPHeaderFields];
                 if (headers && headers.count > 0) {
                     capture[@"request_headers"] = headers;
-                }
-
-                // 捕获请求体
-                NSData *bodyData = [request HTTPBody];
-                if (bodyData && bodyData.length > 0) {
-                    NSString *bodyStr = [[NSString alloc] initWithData:bodyData encoding:NSUTF8StringEncoding];
-                    if (bodyStr) {
-                        capture[@"request_body"] = bodyStr;
-                    }
                 }
 
                 // 保存到 pendingRequests，用任务地址作为 key
@@ -584,7 +565,7 @@ static void closeDataWindow() {
 
                 NSLog(@"[TKCapture] ★★★ Request #%d", captureCount);
                 NSLog(@"[TKCapture]   URL: %@", urlStr);
-                NSLog(@"[TKCapture]   Method: %@", capture[@"method"]);
+                NSLog(@"[TKCapture]   Method: %@", method);
                 NSLog(@"[TKCapture]   Headers: %lu", (unsigned long)[headers count]);
             }
         }
